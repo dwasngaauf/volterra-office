@@ -170,15 +170,20 @@ async function getAbsenceRequests() {
  * Admin: Duyệt (Chấp nhận / Từ chối) yêu cầu
  */
 async function updateRequestStatus(reqId, newStatus) {
+  // Thay vì hardcode path ở đây, hãy gọi theo đúng format chuẩn
   const res = await apiFetch(`/admin/absence-requests/${reqId}`, {
     method: 'PUT',
     body: JSON.stringify({ status: newStatus })
   });
   
   if (res && res.ok) {
-    showToast(`Đã ${newStatus === 'ACCEPTED' ? 'chấp nhận' : 'từ chối'} yêu cầu`, "success");
+    showToast(`Đã cập nhật trạng thái`, "success");
     return true;
   }
+  
+  // Debug lỗi để xem thực hư server trả về cái gì
+  const errorText = await res.text();
+  console.error("Lỗi từ server:", errorText);
   showToast("Lỗi khi cập nhật trạng thái", "error");
   return false;
 }
