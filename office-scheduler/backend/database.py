@@ -1,19 +1,15 @@
 # backend/database.py
-from sqlalchemy import create_engine, Column, Integer, String, Date, Enum, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, Date, Enum, DateTime, ForeignKey, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import enum
-import os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./office_scheduler.db")
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+DATABASE_URL = "sqlite:///./office_scheduler.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
+with engine.connect() as connection:
+    connection.execute(text("PRAGMA journal_mode=WAL;"))
+    
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
