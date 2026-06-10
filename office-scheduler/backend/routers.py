@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List
 import calendar
 
@@ -219,30 +219,32 @@ def get_all_requests(
     ]
 
 # API 3: Admin duyệt yêu cầu
-@router.put("/admin/absence-requests/{req_id}", tags=["Admin"])
-def update_request_status(
-    req_id: int, 
-    payload: schemas.AbsenceRequestUpdate, 
-    admin = Depends(auth.require_admin),
+@router.put("/admin/absence-requests/{req_id}/status", tags=["Admin"])
+def update_absence_status(
+    req_id: int,
+    payload: schemas.AbsenceStatusUpdate,
+    admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    db_req = db.query(database.AbsenceRequest).filter(database.AbsenceRequest.id == req_id).first()
-    
-    if not db_req:
-        raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu này")
-        
-    db_req.status = payload.status
-    
-    # NẾU ACCEPTED -> Tự động xóa cái lịch đó luôn
-    if payload.status == "ACCEPTED":
-    schedule = db.query(database.Schedule).filter(
-        database.Schedule.id == req.schedule_id
+    req = db.query(database.AbsenceRequest).filter(
+        database.AbsenceRequest.id == req_id
     ).first()
-    if schedule:
-        # Xóa request trước, rồi mới xóa schedule để tránh FK violation
-        db.delete(req)
-        db.flush()  # Flush để DB ghi nhận xóa request trước
-        db.delete(schedule)
-            
+    if not req:
+        raise HTTPException(status_code=404, detail="Không tìm thấy request")
+    if req.status != "PENDING":
+        raise HTTPException(status_code=400, detail="Request này đã được xử lý rồi")
+
+    req.status = payload.status
+    req.reviewed_at = datetime.utcnow()
+
+    if payload.status == "ACCEPTED":
+        schedule = db.query(database.Schedule).filter(
+            database.Schedule.id == req.schedule_id
+        ).first()
+        if schedule:
+            db.delete(req)
+            db.flush()
+            db.delete(schedule)
+    
     db.commit()
-    return {"message": f"Đã chuyển trạng thái thành {payload.status}"}
+    return {"message": f"Đã cập nhật trạng thái thành {payload.status}"}
