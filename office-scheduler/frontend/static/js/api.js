@@ -171,9 +171,10 @@ async function getAbsenceRequests() {
  */
 async function updateRequestStatus(reqId, newStatus) {
   // Thay vì hardcode path ở đây, hãy gọi theo đúng format chuẩn
-  const res = await apiFetch(`/admin/absence-requests/${reqId}`, {
-    method: 'PUT',
-    body: JSON.stringify({ status: newStatus })
+  // Sửa dòng này:
+  const res = await apiFetch(`/admin/absence-requests/${reqId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: newStatus })
   });
   
   if (res && res.ok) {
