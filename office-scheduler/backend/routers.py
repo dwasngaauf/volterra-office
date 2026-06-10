@@ -222,7 +222,7 @@ def get_all_requests(
 @router.put("/admin/absence-requests/{req_id}/status", tags=["Admin"])
 def update_absence_status(
     req_id: int,
-    payload: schemas.AbsenceStatusUpdate,
+    payload: schemas.AbsenceRequestUpdate,
     admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
