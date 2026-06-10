@@ -234,17 +234,17 @@ def update_absence_status(
     if req.status != "PENDING":
         raise HTTPException(status_code=400, detail="Request này đã được xử lý rồi")
 
-    req.status = payload.status
-    req.reviewed_at = datetime.utcnow()
-
     if payload.status == "ACCEPTED":
-        schedule = db.query(database.Schedule).filter(
-            database.Schedule.id == req.schedule_id
-        ).first()
-        if schedule:
-            db.delete(req)
-            db.flush()
-            db.delete(schedule)
-    
+        schedule_id = req.schedule_id
+        req.status = "ACCEPTED"
+        req.reviewed_at = datetime.utcnow()
+        db.flush()
+        db.query(database.Schedule).filter(
+            database.Schedule.id == schedule_id
+        ).delete(synchronize_session=False)
+    else:
+        req.status = "REJECTED"
+        req.reviewed_at = datetime.utcnow()
+
     db.commit()
     return {"message": f"Đã cập nhật trạng thái thành {payload.status}"}
