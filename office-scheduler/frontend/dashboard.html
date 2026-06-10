@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lịch làm việc — Volterra Office</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- ── Detail Modal ── -->
+<div class="modal-overlay" id="detail-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h3 id="modal-title">Chi tiết ca</h3>
+        <p class="text-muted" style="font-size:12px;margin-top:2px" id="modal-date"></p>
+      </div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-shift-badge" id="modal-shift-badge"></div>
+    <div class="attendee-list" id="modal-attendees"></div>
+    <div class="modal-action" id="modal-action"></div>
+  </div>
+</div>
+
+<div class="app-layout">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <img src="/static/volterra-logo.png" alt="Volterra">
+      <div>
+        <div class="brand-name">Volterra Office</div>
+        <div class="brand-sub">AI Driven for EV Charging</div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-item active"><span class="icon">🗓️</span>Lịch làm việc</a>
+      <a href="/admin" class="nav-item" id="admin-link" style="display:none"><span class="icon">👥</span>Quản lý nhân sự</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="avatar" id="sb-avatar">?</div>
+        <div style="overflow:hidden">
+          <div class="user-card-name" id="sb-name">...</div>
+          <div class="user-card-role" id="sb-role"></div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="logout()"><span>🚪</span>Đăng xuất</button>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <div class="main-content">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="hamburger" onclick="openSidebar()">☰</button>
+        <div>
+          <div class="topbar-title">Lịch làm việc</div>
+          <div class="topbar-sub" id="topbar-sub">Đăng ký ca lên văn phòng</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="view-tabs">
+          <div class="view-tab active" id="tab-week" onclick="setView('week')">Tuần</div>
+          <div class="view-tab" id="tab-month" onclick="setView('month')">Tháng</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <!-- Stats -->
+      <div class="stats-bar">
+        <div class="stat-card"><div class="stat-label">Ca tôi đã đăng ký</div><div class="stat-value" id="stat-mine">—</div></div>
+        <div class="stat-card"><div class="stat-label">Tổng lượt tuần này</div><div class="stat-value" id="stat-week">—</div></div>
+        <div class="stat-card"><div class="stat-label">Tổng lượt tháng</div><div class="stat-value" id="stat-month">—</div></div>
+      </div>
+
+      <!-- Nav -->
+      <div class="week-nav">
+        <button class="btn btn-outline btn-sm" onclick="navPrev()">‹</button>
+        <button class="btn btn-ghost btn-sm" onclick="navToday()">Hôm nay</button>
+        <button class="btn btn-outline btn-sm" onclick="navNext()">›</button>
+        <span class="week-range" id="nav-label">...</span>
+        <span style="flex:1"></span>
+        <span style="font-size:12px;color:var(--text-muted)">
+          💡 Kéo để chọn nhiều ô cùng lúc
+        </span>
+      </div>
+
+      <!-- Calendar -->
+      <div class="cal-wrapper" id="cal-wrapper">
+        <div class="loading-overlay"><div class="loader"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/api.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const user = requireAuth();
+let view = window.innerWidth < 640 ? "month" : "week"; // auto responsive
+let anchor = new Date(); // current week/month anchor
+let calData = {};        // { "YYYY-MM-DD": { shifts: { "09:00": {count,has_registered,schedule_id} } } }
+let dragging = false;
+let dragSlots = [];      // [{date, shift}] collected during drag
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+if (user) {
+  document.getElementById("sb-avatar").textContent = getInitial(user.full_name);
+  document.getElementById("sb-name").textContent = user.full_name;
+  document.getElementById("sb-role").textContent = user.role === "admin" ? "Quản trị viên" : "Nhân sự";
+  if (user.role === "admin") {
+    const al = document.getElementById("admin-link");
+    al.style.display = "flex";
+  }
+  // Auto switch to month on small screens
+  if (window.innerWidth < 640) {
+    view = "month";
+    document.getElementById("tab-week").classList.remove("active");
+    document.getElementById("tab-month").classList.add("active");
+  }
+  loadAndRender();
+}
+
+window.addEventListener("resize", () => {
+  if (window.innerWidth < 640 && view === "week") {
+    setView("month");
+  }
+});
+
+// ── Sidebar mobile ─────────────────────────────────────────────────────────
+function openSidebar() {
+  document.getElementById("sidebar").classList.add("open");
+  document.getElementById("sidebar-overlay").classList.add("open");
+}
+function closeSidebar() {
+  document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("sidebar-overlay").classList.remove("open");
+}
+
+// ── View toggle ────────────────────────────────────────────────────────────
+function setView(v) {
+  view = v;
+  document.getElementById("tab-week").classList.toggle("active", v === "week");
+  document.getElementById("tab-month").classList.toggle("active", v === "month");
+  loadAndRender();
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function navPrev()  { view === "week" ? (anchor = addDays(anchor,-7)) : shiftMonth(-1); loadAndRender(); }
+function navNext()  { view === "week" ? (anchor = addDays(anchor, 7)) : shiftMonth( 1); loadAndRender(); }
+function navToday() { anchor = new Date(); loadAndRender(); }
+function shiftMonth(d) {
+  anchor = new Date(anchor.getFullYear(), anchor.getMonth() + d, 1);
+}
+
+// ── Data loading ───────────────────────────────────────────────────────────
+async function loadAndRender() {
+  document.getElementById("cal-wrapper").innerHTML =
+    `<div class="loading-overlay"><div class="loader"></div></div>`;
+
+  // Determine year/month range to fetch
+  const months = getRequiredMonths();
+  await Promise.all(months.map(([y,m]) => fetchMonth(y,m)));
+  renderCalendar();
+  updateStats();
+}
+
+function getRequiredMonths() {
+  if (view === "month") {
+    return [[anchor.getFullYear(), anchor.getMonth()+1]];
+  }
+  // Week view: might span 2 months
+  const mon = getWeekStart(anchor);
+  const sun = addDays(mon, 6);
+  const months = [[mon.getFullYear(), mon.getMonth()+1]];
+  if (sun.getMonth() !== mon.getMonth()) {
+    months.push([sun.getFullYear(), sun.getMonth()+1]);
+  }
+  return months;
+}
+
+async function fetchMonth(y, m) {
+  const key = `${y}-${pad(m)}`;
+  // Đã có cache rồi thì bỏ qua — dữ liệu sẽ được reload khi user thao tác
+  if (calData[`_loaded_${key}`]) return;
+  try {
+    const res = await apiFetch(`/calendar?year=${y}&month=${m}`);
+    const data = await res.json();
+    data.days.forEach(d => { calData[d.date] = d; });
+    calData[`_loaded_${key}`] = true;
+  } catch {}
+}
+
+function invalidateMonth(dateStr) {
+  // Xóa cache tháng để force reload lần sau
+  const key = dateStr.slice(0,7).replace("-","_"); // không dùng, xóa toàn bộ cache tháng đó
+  const m = dateStr.slice(0,7);
+  delete calData[`_loaded_${m.replace("-","_").slice(0,4)}-${m.slice(5)}`];
+  // Đơn giản hơn: xóa _loaded_ key tương ứng
+  const [y,mo] = dateStr.split("-");
+  delete calData[`_loaded_${y}-${mo}`];
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderCalendar() {
+  if (view === "week") renderWeek();
+  else renderMonth();
+}
+
+// ── WEEK VIEW ──────────────────────────────────────────────────────────────
+function renderWeek() {
+  const mon = getWeekStart(anchor);
+  document.getElementById("nav-label").textContent = formatWeekRange(mon);
+  document.getElementById("topbar-sub").textContent =
+    `Tuần: ${formatWeekRange(mon)}`;
+
+  const days = Array.from({length:7}, (_,i) => addDays(mon,i));
+  const today = todayStr();
+
+  let html = `<div class="week-grid" id="week-grid">`;
+
+  // Header row
+  html += `<div class="wh-corner"></div>`;
+  days.forEach(d => {
+    const ds = dateObjToStr(d);
+    const dow = d.getDay();
+    const isToday = ds === today;
+    const isWknd = dow === 0 || dow === 6;
+    html += `<div class="wh-day${isToday?" today":""}${isWknd?" weekend":""}">
+      <div class="dow">${DOW_VI[dow]}</div>
+      <div class="dom">${d.getDate()}</div>
+    </div>`;
+  });
+
+  // Time rows
+  SHIFTS.forEach(shift => {
+    html += `<div class="time-label">${SHIFT_LABELS[shift]}</div>`;
+    days.forEach(d => {
+      const ds = dateObjToStr(d);
+      const past = isPast(ds);
+      const dayData = calData[ds];
+      const slotData = dayData?.shifts?.[shift] || {count:0,has_registered:false,schedule_id:null};
+      const hasMe = slotData.has_registered;
+      const count = slotData.count;
+
+      const cellClass = [
+        "cal-cell",
+        past ? "past" : "",
+        hasMe ? "registered" : ""
+      ].filter(Boolean).join(" ");
+
+      html += `<div class="${cellClass}"
+        data-date="${ds}" data-shift="${shift}"
+        onmousedown="startDrag(event,'${ds}','${shift}')"
+        onmouseenter="continueDrag(event,'${ds}','${shift}')"
+        onmouseup="endDrag(event)"
+        onclick="openDetail('${ds}','${shift}')">`;
+
+      if (count > 0 || hasMe) {
+        const chipClass = hasMe ? "my-chip" : "others-chip";
+        html += `<div class="slot-chip ${chipClass}">
+          <span>${hasMe ? "✓ Tôi" : "👥"}</span>
+          <span class="chip-count">${count}</span>
+        </div>`;
+      } else if (!past) {
+        html += `<div class="slot-chip empty-chip">+ Đăng ký</div>`;
+      }
+
+      html += `</div>`;
+    });
+  });
+
+  html += `</div>`;
+  document.getElementById("cal-wrapper").innerHTML = html;
+
+  // Mouse events for drag
+  document.getElementById("week-grid").addEventListener("mouseleave", () => {
+    if (dragging) endDrag({});
+  });
+}
+
+// ── MONTH VIEW ─────────────────────────────────────────────────────────────
+function renderMonth() {
+  const y = anchor.getFullYear(), m = anchor.getMonth()+1;
+  document.getElementById("nav-label").textContent = `${MONTH_VI[m-1]} ${y}`;
+  document.getElementById("topbar-sub").textContent = `${MONTH_VI[m-1]} ${y}`;
+
+  const today = todayStr();
+  const firstDow = new Date(y,m-1,1).getDay();
+  const daysInMonth = getDaysInMonth(y,m);
+
+  let html = `<div class="month-grid">`;
+
+  // Day labels
+  DOW_VI.forEach((d,i) => {
+    html += `<div class="month-daylabel${i===0||i===6?" weekend":""}">${d}</div>`;
+  });
+
+  // Empty cells
+  for(let i=0;i<firstDow;i++) html += `<div class="month-cell empty"></div>`;
+
+  for(let day=1;day<=daysInMonth;day++) {
+    const ds = toDateStr(y,m,day);
+    const past = isPast(ds);
+    const isToday = ds === today;
+    const dow = new Date(y,m-1,day).getDay();
+    const isWknd = dow===0||dow===6;
+    const dayData = calData[ds];
+
+    // Count registered shifts for this day
+    let myCount = 0, totalCount = 0;
+    if (dayData?.shifts) {
+      SHIFTS.forEach(s => {
+        const sd = dayData.shifts[s];
+        if (sd) {
+          totalCount += sd.count;
+          if (sd.has_registered) myCount++;
+        }
+      });
+    }
+
+    const cellClass = ["month-cell", past?"past":"", isToday?"today":"", isWknd?"weekend":""].filter(Boolean).join(" ");
+
+    html += `<div class="${cellClass}" onclick="openDayDetail('${ds}')">
+      <span class="month-day-num">${day}</span>
+      <div class="month-pills">`;
+
+    if (myCount > 0) {
+      html += `<div class="month-pill has-me">✓ Tôi: ${myCount} ca</div>`;
+    }
+    if (totalCount > 0) {
+      html += `<div class="month-pill">👥 ${totalCount} lượt</div>`;
+    }
+
+    html += `</div></div>`;
+  }
+
+  html += `</div>`;
+  document.getElementById("cal-wrapper").innerHTML = html;
+}
+
+// ── Drag-to-select (week view only) ───────────────────────────────────────
+function startDrag(e, ds, shift) {
+  if (e.button !== 0) return;
+  dragging = true;
+  dragSlots = [];
+  addDragSlot(ds, shift);
+  e.preventDefault();
+}
+function continueDrag(e, ds, shift) {
+  if (!dragging) return;
+  addDragSlot(ds, shift);
+  // Visual highlight
+  document.querySelectorAll(".cal-cell.drag-over").forEach(el => el.classList.remove("drag-over"));
+  dragSlots.forEach(({date,shift:s}) => {
+    const el = document.querySelector(`[data-date="${date}"][data-shift="${s}"]`);
+    if (el) el.classList.add("drag-over");
+  });
+}
+function addDragSlot(ds, shift) {
+  if (!dragSlots.find(x => x.date===ds && x.shift===shift)) {
+    dragSlots.push({date:ds, shift});
+  }
+}
+function endDrag(e) {
+  if (!dragging) return;
+  dragging = false;
+  document.querySelectorAll(".cal-cell.drag-over").forEach(el => el.classList.remove("drag-over"));
+  if (dragSlots.length > 1) {
+    confirmBulkBooking(dragSlots);
+  }
+  // Single click handled by onclick
+}
+
+// ── Bulk booking (drag selected) ───────────────────────────────────────────
+async function confirmBulkBooking(slots) {
+  const future = slots.filter(({date}) => !isPast(date));
+  if (future.length === 0) { showToast("Không có ca tương lai nào được chọn","error"); return; }
+
+  // Check which ones are already registered
+  const toBook = future.filter(({date,shift}) => {
+    return !calData[date]?.shifts?.[shift]?.has_registered;
+  });
+  const toCancel = future.filter(({date,shift}) => {
+    return calData[date]?.shifts?.[shift]?.has_registered;
+  });
+
+  let msg = `Bạn đã chọn ${future.length} ô:\n`;
+  if (toBook.length) msg += `• Đăng ký ${toBook.length} ca mới\n`;
+  if (toCancel.length) msg += `• Hủy ${toCancel.length} ca đã đăng ký\n`;
+  if (!confirm(msg + "\nXác nhận?")) return;
+
+  let ok = 0, fail = 0;
+  // Book new
+  for (const {date, shift} of toBook) {
+    const res = await apiFetch("/schedules", {
+      method:"POST", body:JSON.stringify({date, shift})
+    });
+    if (res && (res.ok || res.status===409)) ok++;
+    else fail++;
+  }
+  
+  // Cancel
+  for (const {date, shift} of toCancel) {
+    const sid = calData[date]?.shifts?.[shift]?.schedule_id;
+    if (!sid) continue;
+    
+    // Gọi hàm check khóa cho từng ca trong chuỗi kéo thả
+    const success = await cancelScheduleWithLock(sid, date);
+    if (success) ok++; else fail++;
+  }
+
+  // Clear cache & reload
+  future.forEach(({date}) => invalidateMonth(date));
+  calData = {}; // force full reload
+  loadAndRender();
+}
+
+// ── Single cell open detail ────────────────────────────────────────────────
+function openDetail(ds, shift) {
+  if (dragging || dragSlots.length > 1) return; // came from drag
+  showDetailModal(ds, shift);
+}
+
+function openDayDetail(ds) {
+  // Month view: show a mini modal listing all shifts for that day
+  const dayData = calData[ds];
+  const [y,m,d] = ds.split("-");
+  const dateLabel = `${d}/${m}/${y} — ${DOW_VI[new Date(ds).getDay()]}`;
+
+  document.getElementById("modal-title").textContent = dateLabel;
+  document.getElementById("modal-date").textContent = "Tất cả khung giờ trong ngày";
+  document.getElementById("modal-shift-badge").textContent = "";
+
+  const container = document.getElementById("modal-attendees");
+  let html = "";
+  const past = isPast(ds);
+
+  SHIFTS.forEach(shift => {
+    const sd = dayData?.shifts?.[shift] || {count:0,has_registered:false,schedule_id:null};
+    const hasMe = sd.has_registered;
+    const actionLabel = hasMe ? "Hủy" : "Đăng ký";
+    const actionClass = hasMe ? "btn-danger" : "btn-primary";
+    const disabledAttr = past ? "disabled style='opacity:.4;cursor:default'" : "";
+
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;
+      padding:8px 10px;border-radius:7px;margin-bottom:4px;
+      background:${hasMe?"var(--brand-light)":"var(--surface-2)"};
+      border:1px solid ${hasMe?"var(--brand)":"var(--border)"}">
+      <div>
+        <span style="font-weight:600;font-size:13px">${SHIFT_LABELS[shift]}</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:8px">${sd.count} người</span>
+        ${hasMe ? '<span style="font-size:11px;color:var(--brand);margin-left:6px;font-weight:600">✓ Đã đăng ký</span>' : ""}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" style="color:var(--brand);font-size:11px"
+          onclick="showDetailModal('${ds}','${shift}')">Xem</button>
+        ${!past ? `<button class="btn btn-sm ${actionClass}" ${disabledAttr}
+          onclick="toggleBooking('${ds}','${shift}',${hasMe},${sd.schedule_id||'null'},true)">${actionLabel}</button>` : ""}
+      </div>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+  document.getElementById("modal-action").innerHTML = "";
+  document.getElementById("detail-modal").classList.add("open");
+}
+
+// ── Detail modal (single shift) ────────────────────────────────────────────
+async function showDetailModal(ds, shift) {
+  const [y,m,d] = ds.split("-");
+  const dayData = calData[ds];
+  const sd = dayData?.shifts?.[shift] || {count:0,has_registered:false,schedule_id:null};
+  const past = isPast(ds);
+
+  document.getElementById("modal-title").textContent = `${d}/${m}/${y} — ${DOW_VI[new Date(ds).getDay()]}`;
+  document.getElementById("modal-date").textContent = `Ca ${SHIFT_LABELS[shift]} (${shift} – ${nextHour(shift)})`;
+  document.getElementById("modal-shift-badge").textContent = `🕐 ${SHIFT_LABELS[shift]}  •  ${sd.count} người`;
+  document.getElementById("modal-attendees").innerHTML =
+    `<div class="loading-overlay"><div class="loader"></div></div>`;
+
+  // Action button
+  const actionDiv = document.getElementById("modal-action");
+  if (!past) {
+    const hasMe = sd.has_registered;
+    actionDiv.innerHTML = `<button class="btn ${hasMe?"btn-danger":"btn-primary"}"
+      onclick="toggleBooking('${ds}','${shift}',${hasMe},${sd.schedule_id||'null'})">
+      ${hasMe ? "🗑 Hủy đăng ký" : "✅ Đăng ký ca này"}
+    </button>`;
+  } else {
+    actionDiv.innerHTML = `<span style="font-size:12px;color:var(--text-muted)">Ngày đã qua</span>`;
+  }
+
+  document.getElementById("detail-modal").classList.add("open");
+
+  // Load attendees
+  try {
+    const res = await apiFetch(`/calendar/detail?date_str=${ds}&shift=${encodeURIComponent(shift)}`);
+    const data = await res.json();
+    const container = document.getElementById("modal-attendees");
+    if (!data.attendees?.length) {
+      container.innerHTML = `<p class="empty-state">Chưa có ai đăng ký ca này 🏖️</p>`;
+      return;
+    }
+    container.innerHTML = data.attendees.map(u => `
+      <div class="attendee-item${u.id===user.id?" is-me":""}">
+        <div class="avatar">${getInitial(u.full_name)}</div>
+        <div>
+          <div class="attendee-name">${u.full_name}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${u.username}</div>
+        </div>
+        ${u.id===user.id?'<span class="attendee-you">Bạn</span>':""}
+      </div>`).join("");
+  } catch {
+    document.getElementById("modal-attendees").innerHTML =
+      `<p class="empty-state" style="color:var(--danger)">Lỗi tải dữ liệu</p>`;
+  }
+}
+
+function nextHour(shift) {
+  const h = parseInt(shift) + 1;
+  return `${pad(h)}:00`;
+}
+
+function closeModal() {
+  document.getElementById("detail-modal").classList.remove("open");
+}
+document.getElementById("detail-modal").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// ── Toggle single booking ──────────────────────────────────────────────────
+async function toggleBooking(ds, shift, hasRegistered, scheduleId, keepModalOpen=false) {
+  try {
+    if (hasRegistered && scheduleId) {
+      // Đi qua hàm check khóa 7 ngày của api.js thay vì delete thẳng
+      const success = await cancelScheduleWithLock(scheduleId, ds);
+      if (!success) return; // Nếu dính luật 7 ngày (đang chờ duyệt vắng) hoặc lỗi thì dừng lại, không làm gì thêm
+    } else {
+      const res = await apiFetch("/schedules", {
+        method:"POST", body:JSON.stringify({date:ds, shift})
+      });
+      if (res && res.ok) {
+        showToast(`Đã đăng ký ca ${SHIFT_LABELS[shift]} ngày ${ds}`, "success");
+      } else if (res) {
+        const e = await res.json(); showToast(e.detail||"Lỗi đăng ký","error"); return;
+      }
+    }
+  } catch { showToast("Lỗi kết nối","error"); return; }
+
+  invalidateMonth(ds);
+  calData = {};
+  if (!keepModalOpen) closeModal();
+  await loadAndRender();
+  // Reopen modal with fresh data if needed
+  if (keepModalOpen) openDayDetail(ds);
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+async function updateStats() {
+  // My total this month
+  const y = anchor.getFullYear(), m = anchor.getMonth()+1;
+  let mine=0, weekTotal=0, monthTotal=0;
+  const today = todayStr();
+  const mon = getWeekStart(anchor);
+  const sun = dateObjToStr(addDays(mon,6));
+  const monStr = dateObjToStr(mon);
+
+  Object.entries(calData).forEach(([ds, dd]) => {
+    if (ds.startsWith("_")) return;
+    if (ds.startsWith(`${y}-${pad(m)}`)) {
+      SHIFTS.forEach(s => {
+        const sd = dd?.shifts?.[s];
+        if (!sd) return;
+        monthTotal += sd.count;
+        if (sd.has_registered) mine++;
+        if (ds >= monStr && ds <= sun) weekTotal += sd.count;
+      });
+    }
+  });
+
+  document.getElementById("stat-mine").textContent = mine;
+  document.getElementById("stat-week").textContent = weekTotal;
+  document.getElementById("stat-month").textContent = monthTotal;
+}
+
+// Prevent text selection during drag
+document.addEventListener("mouseup", () => {
+  if (dragging) { dragging = false; dragSlots = []; }
+});
+</script>
+</body>
+</html>

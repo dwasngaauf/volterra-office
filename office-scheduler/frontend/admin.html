@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nhân sự — Volterra Office</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- Add user modal -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Thêm tài khoản nhân sự</h3>
+      <button class="modal-close" onclick="closeAdd()">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Họ và tên</label>
+      <input class="form-input" id="f-name" placeholder="Nguyễn Văn A">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Username</label>
+      <input class="form-input" id="f-user" placeholder="nguyenvana">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mật khẩu</label>
+      <input class="form-input" type="password" id="f-pass" placeholder="Tối thiểu 6 ký tự">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Vai trò</label>
+      <select class="form-input" id="f-role">
+        <option value="user">Người dùng</option>
+        <option value="admin">Quản trị viên</option>
+      </select>
+    </div>
+    <div class="modal-action">
+      <button class="btn btn-outline" onclick="closeAdd()">Hủy</button>
+      <button class="btn btn-primary" onclick="createUser()">Tạo tài khoản</button>
+    </div>
+  </div>
+</div>
+
+<div class="app-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <img src="/static/volterra-logo.png" alt="Volterra">
+      <div>
+        <div class="brand-name">Volterra Office</div>
+        <div class="brand-sub">AI Driven for EV Charging</div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/dashboard" class="nav-item"><span class="icon">🗓️</span>Lịch làm việc</a>
+      <a href="/admin" class="nav-item active"><span class="icon">👥</span>Quản lý nhân sự</a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="avatar" id="sb-avatar">A</div>
+        <div style="overflow:hidden">
+          <div class="user-card-name" id="sb-name">Admin</div>
+          <div class="user-card-role">Quản trị viên</div>
+        </div>
+      </div>
+      <button class="logout-btn" onclick="logout()"><span>🚪</span>Đăng xuất</button>
+    </div>
+  </aside>
+
+  <div class="main-content">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="hamburger" onclick="openSidebar()">☰</button>
+        <div>
+          <div class="topbar-title">Quản lý nhân sự</div>
+          <div class="topbar-sub">Tạo và quản lý tài khoản</div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-modal').classList.add('open')">
+        + Thêm nhân sự
+      </button>
+    </div>
+    
+    <div class="content-area">
+      <div class="table-card">
+        <table class="data-table">
+          <thead>
+            <tr><th>#</th><th>Họ và tên</th><th>Username</th><th>Vai trò</th><th>Thao tác</th></tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="5" style="text-align:center;padding:32px"><div class="loader" style="margin:auto"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="topbar-left" style="padding: 24px 0 12px 0;">
+        <div>
+          <div class="topbar-title">Yêu cầu xin vắng mặt</div>
+          <div class="topbar-sub">Phê duyệt hoặc từ chối lịch xin nghỉ muộn (dưới 7 ngày)</div>
+        </div>
+      </div>
+      <div class="table-card" style="margin-bottom: 20px;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Mã NV</th>
+              <th>Mã Lịch</th>
+              <th>Lý do xin vắng mặt</th>
+              <th>Trạng thái</th>
+              <th>Thao tác xử lý</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-requests">
+            <tr><td colspan="5" style="text-align:center;padding:32px"><div class="loader" style="margin:auto"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div> </div> </div> <script src="/static/js/api.js"></script>
+<script>
+const admin = requireAdmin();
+if (admin) {
+  document.getElementById("sb-avatar").textContent = getInitial(admin.full_name);
+  document.getElementById("sb-name").textContent = admin.full_name;
+  loadUsers();
+  loadRequests(); // <-- ĐÃ SỬA: Thêm chữ 's' ở đây để không bị crash
+}
+
+function openSidebar() { document.getElementById("sidebar").classList.add("open"); document.getElementById("sidebar-overlay").classList.add("open"); }
+function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); document.getElementById("sidebar-overlay").classList.remove("open"); }
+
+async function loadUsers() {
+  const res = await apiFetch("/admin/users");
+  const users = await res.json();
+  const tbody = document.getElementById("tbody");
+  if (!users.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="text-align:center;padding:24px">Chưa có nhân sự</td></tr>`; return; }
+  tbody.innerHTML = users.map((u,i) => `
+    <tr>
+      <td class="text-muted" style="color:var(--text-muted)">${i+1}</td>
+      <td><div style="display:flex;align-items:center;gap:9px">
+        <div class="avatar" style="width:28px;height:28px;font-size:11px">${getInitial(u.full_name)}</div>
+        <span style="font-weight:500">${u.full_name}</span>
+      </div></td>
+      <td style="color:var(--text-muted)">${u.username}</td>
+      <td><span class="badge ${u.role==="admin"?"badge-admin":"badge-user"}">${u.role==="admin"?"Admin":"Nhân sự"}</span></td>
+      <td>${u.role!=="admin"
+        ? `<button class="btn btn-sm" style="color:var(--danger)" onclick="deleteUser(${u.id},'${u.full_name}')">Xóa</button>`
+        : `<span style="color:var(--text-light);font-size:12px">—</span>`}</td>
+    </tr>`).join("");
+}
+
+function closeAdd() {
+  document.getElementById("add-modal").classList.remove("open");
+  ["f-name","f-user","f-pass"].forEach(id => document.getElementById(id).value="");
+}
+
+async function createUser() {
+  const full_name = document.getElementById("f-name").value.trim();
+  const username  = document.getElementById("f-user").value.trim();
+  const password  = document.getElementById("f-pass").value;
+  const role      = document.getElementById("f-role").value;
+  if (!full_name||!username||!password) { showToast("Điền đầy đủ thông tin","error"); return; }
+  if (password.length<6) { showToast("Mật khẩu tối thiểu 6 ký tự","error"); return; }
+  const res = await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username,password,full_name,role})});
+  if (res.ok) { showToast(`Đã tạo tài khoản cho ${full_name}`); closeAdd(); loadUsers(); }
+  else { const e=await res.json(); showToast(e.detail||"Lỗi tạo tài khoản","error"); }
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Xóa tài khoản "${name}"? Toàn bộ lịch của họ cũng bị xóa.`)) return;
+  const res = await apiFetch(`/admin/users/${id}`,{method:"DELETE"});
+  if (res.ok||res.status===204) { showToast(`Đã xóa ${name}`); loadUsers(); }
+  else showToast("Xóa thất bại","error");
+}
+document.getElementById("add-modal").addEventListener("click",e=>{if(e.target===e.currentTarget)closeAdd()});
+
+// ── XỬ LÝ LOGIC DUYỆT VẮNG MẶT CỦA ADMIN ─────────────────────────────────────
+async function loadRequests() {
+  const requests = await getAbsenceRequests(); 
+  const tbody = document.getElementById("tbody-requests");
+  
+  if (!requests || !requests.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="text-align:center;padding:24px">Không có yêu cầu xin vắng mặt nào cần xử lý 🏖️</td></tr>`;
+    return;
+  }
+  
+  tbody.innerHTML = requests.map(r => {
+    let statusBadge = "";
+    if (r.status === "PENDING") {
+      statusBadge = `<span class="badge" style="background:var(--warning);color:#fff">Chờ duyệt</span>`;
+    } else if (r.status === "ACCEPTED") {
+      statusBadge = `<span class="badge" style="background:var(--success);color:#fff">Đã chấp nhận</span>`;
+    } else {
+      statusBadge = `<span class="badge" style="background:var(--danger);color:#fff">Đã từ chối</span>`;
+    }
+
+    const actionButtons = r.status === "PENDING"
+      ? `<button class="btn btn-sm btn-primary" onclick="handleRequest(${r.id}, 'ACCEPTED')">Duyệt nghỉ</button>
+         <button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="handleRequest(${r.id}, 'REJECTED')">Từ chối</button>`
+      : `<span style="color:var(--text-light);font-size:12px">Đã xử lý xong</span>`;
+
+    return `
+      <tr>
+        <td style="font-weight:600;color:var(--brand-dark)">ID: ${r.user_id}</td>
+        <td class="text-muted">ID Lịch: ${r.schedule_id}</td>
+        <td><span style="font-style:italic;color:var(--text-muted)">"${r.reason}"</span></td>
+        <td>${statusBadge}</td>
+        <td><div style="display:flex;gap:6px">${actionButtons}</div></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function handleRequest(reqId, status) {
+  const confirmMsg = status === 'ACCEPTED' ? "Chấp nhận yêu cầu này và xoá lịch trực của nhân viên?" : "Từ chối yêu cầu và giữ nguyên lịch trực?";
+  if (!confirm(confirmMsg)) return;
+  
+  const success = await updateRequestStatus(reqId, status); 
+  if (success) {
+    loadRequests(); 
+    if (typeof loadUsers === "function") loadUsers(); 
+  }
+}
+</script>
