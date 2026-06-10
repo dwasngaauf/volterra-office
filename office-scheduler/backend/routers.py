@@ -235,9 +235,14 @@ def update_request_status(
     
     # NẾU ACCEPTED -> Tự động xóa cái lịch đó luôn
     if payload.status == "ACCEPTED":
-        schedule = db.query(database.Schedule).filter(database.Schedule.id == db_req.schedule_id).first()
-        if schedule:
-            db.delete(schedule)
+    schedule = db.query(database.Schedule).filter(
+        database.Schedule.id == req.schedule_id
+    ).first()
+    if schedule:
+        # Xóa request trước, rồi mới xóa schedule để tránh FK violation
+        db.delete(req)
+        db.flush()  # Flush để DB ghi nhận xóa request trước
+        db.delete(schedule)
             
     db.commit()
     return {"message": f"Đã chuyển trạng thái thành {payload.status}"}
