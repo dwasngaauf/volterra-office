@@ -238,10 +238,14 @@ def update_absence_status(
         schedule_id = req.schedule_id
         req.status = "ACCEPTED"
         req.reviewed_at = datetime.utcnow()
-        db.flush()
-        db.query(database.Schedule).filter(
-            database.Schedule.id == schedule_id
-        ).delete(synchronize_session=False)
+        
+        # --- ĐOẠN CODE SỬA Ở ĐÂY ---
+        # Tìm chính xác cái lịch trực đó ra
+        sched_to_del = db.query(database.Schedule).filter(database.Schedule.id == schedule_id).first()
+        if sched_to_del:
+            # Rồi mới ra lệnh xóa (Cách này không bao giờ bị khóa DB)
+            db.delete(sched_to_del)
+            
     else:
         req.status = "REJECTED"
         req.reviewed_at = datetime.utcnow()
