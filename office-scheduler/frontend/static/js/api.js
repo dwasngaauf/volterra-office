@@ -19,7 +19,9 @@ function saveAuth(data) {
   localStorage.setItem("token", data.access_token);
   localStorage.setItem("user", JSON.stringify({
     id: data.user_id, username: data.username,
-    full_name: data.full_name, role: data.role
+    full_name: data.full_name, role: data.role,
+    department: data.department || null,
+    employee_code: data.employee_code || null
   }));
 }
 function getUser() {
@@ -54,17 +56,82 @@ function showToast(msg, type = "success") {
 // Helpers
 function getInitial(name) { return (name || "?").charAt(0).toUpperCase(); }
 
+// ── 4 ca mới ──────────────────────────────────────────────────────────────
 const SHIFTS = [
-  "09:00","10:00","11:00","12:00","13:00",
-  "14:00","15:00","16:00","17:00","18:00",
-  "19:00","20:00","21:00"
+  "09:00-12:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00"
 ];
 const SHIFT_LABELS = {
-  "09:00":"9h","10:00":"10h","11:00":"11h","12:00":"12h","13:00":"13h",
-  "14:00":"14h","15:00":"15h","16:00":"16h","17:00":"17h","18:00":"18h",
-  "19:00":"19h","20:00":"20h","21:00":"21h"
+  "09:00-12:00": "9h – 12h",
+  "14:00-16:00": "14h – 16h",
+  "16:00-18:00": "16h – 18h",
+  "18:00-20:00": "18h – 20h",
 };
-const DOW_VI  = ["CN","T2","T3","T4","T5","T6","T7"];
+
+// ── Department colors ──────────────────────────────────────────────────────
+const DEPT_COLORS = {
+  hardware: "#f97316",   // cam
+  software: "#ec4899",   // hồng
+  business: "#3b82f6",   // xanh nước biển
+};
+const DEPT_LABELS = {
+  hardware: "Hardware",
+  software: "Software",
+  business: "Business",
+};
+const DEPT_ORDER = ["business", "hardware", "software"];
+
+/**
+ * Render thanh màu 3 phân khúc dựa trên dept_counts.
+ * Trả về HTML string của element .dept-bar
+ */
+function renderDeptBar(deptCounts, total) {
+  if (!total || total === 0) return "";
+  const hw  = (deptCounts && deptCounts.hardware)  ? deptCounts.hardware  : 0;
+  const sw  = (deptCounts && deptCounts.software)  ? deptCounts.software  : 0;
+  const biz = (deptCounts && deptCounts.business)  ? deptCounts.business  : 0;
+  const known = hw + sw + biz;
+
+  // Nếu không ai có dept -> bar xám toàn bộ
+  if (known === 0) {
+    return `<div style="height:6px;border-radius:3px;background:#e2e8f0;margin-bottom:3px;width:100%"></div>`;
+  }
+
+  const parts = [
+    { dept: "business", n: biz, color: DEPT_COLORS.business },
+    { dept: "hardware", n: hw,  color: DEPT_COLORS.hardware },
+    { dept: "software", n: sw,  color: DEPT_COLORS.software },
+  ].filter(p => p.n > 0);
+
+  const segments = parts.map(p =>
+    `<div style="flex:${p.n};background:${p.color};min-width:4px" title="${DEPT_LABELS[p.dept]}: ${p.n}"></div>`
+  ).join("");
+
+  return `<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-bottom:3px;width:100%;gap:1px">${segments}</div>`;
+}
+
+/**
+ * Render badge màu department cho một user
+ */
+function renderDeptBadge(department) {
+  if (!department) return "";
+  const color = DEPT_COLORS[department] || "#94a3b8";
+  const label = DEPT_LABELS[department] || department;
+  return `<span class="dept-badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${label}</span>`;
+}
+
+/**
+ * Render avatar có màu department
+ */
+function renderAvatar(name, department, size = "") {
+  const color = department ? DEPT_COLORS[department] : "var(--brand)";
+  const sizeStyle = size === "sm" ? "width:24px;height:24px;font-size:10px" : "";
+  return `<div class="avatar" style="background:${color};${sizeStyle}">${getInitial(name)}</div>`;
+}
+
+const DOW_VI   = ["CN","T2","T3","T4","T5","T6","T7"];
 const MONTH_VI = ["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6",
                   "Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
 
@@ -76,9 +143,9 @@ function todayStr() {
 }
 function isPast(ds) { return ds < todayStr(); }
 function getDaysInMonth(y,m) { return new Date(y,m,0).getDate(); }
-function getWeekStart(date) { // Monday
+function getWeekStart(date) {
   const d = new Date(date);
-  const dow = d.getDay(); // 0=Sun
+  const dow = d.getDay();
   const diff = dow === 0 ? -6 : 1 - dow;
   d.setDate(d.getDate() + diff);
   return d;
@@ -97,57 +164,100 @@ function dateObjToStr(d) {
   return toDateStr(d.getFullYear(), d.getMonth()+1, d.getDate());
 }
 
-// ── ABSENCE REQUESTS (XIN VẮNG MẶT) ──────────────────────────────────────────
+// ── CHANGE PASSWORD ────────────────────────────────────────────────────────
+async function changePassword(oldPass, newPass) {
+  const res = await apiFetch("/auth/change-password", {
+    method: "PUT",
+    body: JSON.stringify({ old_password: oldPass, new_password: newPass })
+  });
+  return res;
+}
 
+// ── ADMIN: CẬP NHẬT ROLE ──────────────────────────────────────────────────
+async function updateUserRole(userId, role) {
+  const res = await apiFetch(`/admin/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role })
+  });
+  return res;
+}
+
+// ── ADMIN: CẬP NHẬT DEPARTMENT ────────────────────────────────────────────
+async function updateUserDepartment(userId, department) {
+  const res = await apiFetch(`/admin/users/${userId}/department`, {
+    method: "PUT",
+    body: JSON.stringify({ department })
+  });
+  return res;
+}
+
+// ── BOOK/CANCEL CẢ NGÀY ───────────────────────────────────────────────────
 /**
- * Gọi API Hủy lịch. Nếu server báo lỗi 403 (LOCKED_7_DAYS),
- * tự động hỏi lý do và gọi API xin vắng mặt.
+ * Đăng ký hoặc hủy tất cả ca trong một ngày.
+ * action: "book" | "cancel"
  */
+async function bookOrCancelDay(dateStr, calData, action) {
+  const dayData = calData[dateStr];
+  if (!dayData?.shifts) return { ok: 0, fail: 0 };
+
+  let ok = 0, fail = 0;
+
+  for (const shift of SHIFTS) {
+    const sd = dayData.shifts[shift];
+    if (!sd) continue;
+
+    if (action === "book") {
+      if (sd.has_registered) { ok++; continue; } // đã đăng ký rồi
+      const res = await apiFetch("/schedules", {
+        method: "POST",
+        body: JSON.stringify({ date: dateStr, shift })
+      });
+      if (res && (res.ok || res.status === 409)) ok++; else fail++;
+    } else {
+      if (!sd.has_registered || !sd.schedule_id) { ok++; continue; }
+      const success = await cancelScheduleWithLock(sd.schedule_id, dateStr);
+      if (success) ok++; else fail++;
+    }
+  }
+
+  return { ok, fail };
+}
+
+// ── ABSENCE REQUESTS ──────────────────────────────────────────────────────
 async function cancelScheduleWithLock(scheduleId, dateStr) {
   try {
-    const res = await apiFetch(`/schedules/${scheduleId}`, { method: 'DELETE' });
+    const res = await apiFetch(`/schedules/${scheduleId}`, { method: "DELETE" });
 
     if (res && res.status === 403) {
       const errorData = await res.json();
-      
-      // Nếu lỗi là do luật khóa 7 ngày
       if (errorData.detail === "LOCKED_7_DAYS") {
         const reason = prompt(`Lịch ngày ${dateStr} đã bị khóa (dưới 7 ngày).\nBạn có việc đột xuất? Vui lòng nhập lý do xin vắng mặt để Admin duyệt:`);
-        
-        // Nếu user có nhập lý do và bấm OK
         if (reason && reason.trim() !== "") {
-          const reqRes = await apiFetch('/absence-requests/', {
-            method: 'POST',
-            body: JSON.stringify({
-              schedule_id: scheduleId,
-              reason: reason.trim()
-            })
+          const reqRes = await apiFetch("/absence-requests/", {
+            method: "POST",
+            body: JSON.stringify({ schedule_id: scheduleId, reason: reason.trim() })
           });
-
           if (reqRes && reqRes.ok) {
             showToast("Đã gửi yêu cầu xin vắng mặt thành công!", "success");
-            return false; // Báo cho giao diện biết là chưa hủy ngay, đang chờ duyệt
+            return false;
           } else {
             showToast("Lỗi khi gửi yêu cầu vắng mặt", "error");
           }
         } else if (reason !== null) {
-            showToast("Lý do không được để trống", "error");
+          showToast("Lý do không được để trống", "error");
         }
         return false;
       } else {
-         // Lỗi 403 khác (vd: xóa lịch của người khác)
-         showToast(errorData.detail, "error");
-         return false;
+        showToast(errorData.detail, "error");
+        return false;
       }
     }
 
     if (res && res.ok) {
       showToast("Hủy lịch thành công!", "success");
-      return true; // Báo cho giao diện biết là đã hủy thành công để load lại lịch
+      return true;
     }
-    
     return false;
-
   } catch (error) {
     console.error("Lỗi khi hủy lịch:", error);
     showToast("Lỗi kết nối", "error");
@@ -155,34 +265,21 @@ async function cancelScheduleWithLock(scheduleId, dateStr) {
   }
 }
 
-/**
- * Admin: Lấy danh sách yêu cầu xin vắng mặt
- */
 async function getAbsenceRequests() {
-  const res = await apiFetch('/admin/absence-requests/');
-  if (res && res.ok) {
-    return await res.json();
-  }
+  const res = await apiFetch("/admin/absence-requests/");
+  if (res && res.ok) return await res.json();
   return [];
 }
 
-/**
- * Admin: Duyệt (Chấp nhận / Từ chối) yêu cầu
- */
 async function updateRequestStatus(reqId, newStatus) {
-  // Thay vì hardcode path ở đây, hãy gọi theo đúng format chuẩn
-  // Sửa dòng này:
   const res = await apiFetch(`/admin/absence-requests/${reqId}/status`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: newStatus })
+    method: "PUT",
+    body: JSON.stringify({ status: newStatus })
   });
-  
   if (res && res.ok) {
-    showToast(`Đã cập nhật trạng thái`, "success");
+    showToast("Đã cập nhật trạng thái", "success");
     return true;
   }
-  
-  // Debug lỗi để xem thực hư server trả về cái gì
   const errorText = await res.text();
   console.error("Lỗi từ server:", errorText);
   showToast("Lỗi khi cập nhật trạng thái", "error");
