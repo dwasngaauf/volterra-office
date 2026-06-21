@@ -50,7 +50,7 @@ def get_calendar(
     db: Session = Depends(database.get_db)
 ):
     first_day = date(year, month, 1)
-    last_day = date(year, month, calendar.monthrange(year, month)[1])
+    last_day  = date(year, month, calendar.monthrange(year, month)[1])
 
     schedules = db.query(database.Schedule).options(
         joinedload(database.Schedule.user)
@@ -58,7 +58,6 @@ def get_calendar(
         and_(database.Schedule.date >= first_day, database.Schedule.date <= last_day)
     ).all()
 
-    # { "YYYY-MM-DD": { "09:00-12:00": [schedule,...], ... } }
     schedule_map: dict = {}
     for s in schedules:
         key = s.date.isoformat()
@@ -77,7 +76,6 @@ def get_calendar(
             slot = day_data.get(h, [])
             user_schedule = next((s for s in slot if s.user_id == current_user.id), None)
 
-            # Đếm theo department
             dept_counts = {"hardware": 0, "software": 0, "business": 0}
             for s in slot:
                 dept = s.user.department if s.user and s.user.department else None
@@ -108,13 +106,12 @@ def get_day_detail(
         raise HTTPException(status_code=400, detail="Định dạng ngày không hợp lệ")
 
     if shift not in database.ALL_SHIFTS:
-        raise HTTPException(status_code=400, detail=f"Ca không hợp lệ. Phải là một trong: {database.ALL_SHIFTS}")
+        raise HTTPException(status_code=400, detail=f"Ca không hợp lệ")
 
     schedules = db.query(database.Schedule).filter(
         and_(database.Schedule.date == target_date, database.Schedule.shift == shift)
     ).order_by(database.Schedule.created_at).all()
 
-    # Sắp xếp: business → hardware → software, rồi theo created_at
     DEPT_ORDER = {"business": 0, "hardware": 1, "software": 2, None: 3}
     schedules.sort(key=lambda s: (
         DEPT_ORDER.get(s.user.department if s.user else None, 3),
@@ -141,11 +138,14 @@ def create_schedule(
     if existing:
         raise HTTPException(status_code=409, detail="Bạn đã đăng ký khung giờ này rồi")
 
-    new_schedule = database.Schedule(user_id=current_user.id, date=payload.date, shift=payload.shift)
+    new_schedule = database.Schedule(
+        user_id=current_user.id, date=payload.date, shift=payload.shift
+    )
     db.add(new_schedule)
     db.commit()
     db.refresh(new_schedule)
     return new_schedule
+
 
 @router.delete("/schedules/{schedule_id}", status_code=204, tags=["Booking"])
 def delete_schedule(
@@ -153,7 +153,9 @@ def delete_schedule(
     current_user: database.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db)
 ):
-    schedule = db.query(database.Schedule).filter(database.Schedule.id == schedule_id).first()
+    schedule = db.query(database.Schedule).filter(
+        database.Schedule.id == schedule_id
+    ).first()
 
     if not schedule:
         raise HTTPException(status_code=404, detail="Không tìm thấy lịch đăng ký")
@@ -161,7 +163,7 @@ def delete_schedule(
     if schedule.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Không có quyền hủy lịch của người khác")
 
-    # Khóa 7 ngày — chỉ áp dụng cho user thường
+    # Luật khóa 7 ngày — chỉ áp dụng cho user thường
     if current_user.role != "admin":
         today = date.today()
         sched_date = schedule.date
@@ -173,10 +175,14 @@ def delete_schedule(
     db.delete(schedule)
     db.commit()
 
-# ── ADMIN ─────────────────────────────────────────────────────────────────────
+# ── ADMIN USERS ───────────────────────────────────────────────────────────────
 @router.get("/admin/users", response_model=List[schemas.UserResponse], tags=["Admin"])
-def get_all_users(admin=Depends(auth.require_admin), db: Session = Depends(database.get_db)):
+def get_all_users(
+    admin=Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
     return db.query(database.User).all()
+
 
 @router.post("/admin/users", response_model=schemas.UserResponse, tags=["Admin"])
 def create_user(
@@ -200,21 +206,40 @@ def create_user(
     db.refresh(new_user)
     return new_user
 
+
 @router.delete("/admin/users/{user_id}", status_code=204, tags=["Admin"])
-def delete_user(user_id: int, admin=Depends(auth.require_admin), db: Session = Depends(database.get_db)):
+def delete_user(
+    user_id: int,
+    admin=Depends(auth.require_admin),
+    db: Session = Depends(database.get_db)
+):
     user = db.query(database.User).filter(database.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy user")
     if user.role == "admin":
         raise HTTPException(status_code=400, detail="Không thể xóa tài khoản admin")
-    # Xóa absence_requests liên quan trước (PostgreSQL strict foreign key)
-    schedule_ids = [s.id for s in db.query(database.Schedule).filter(database.Schedule.user_id == user_id).all()]
+
+    # Xóa absence_requests liên quan trước (PostgreSQL strict FK)
+    schedule_ids = [
+        s.id for s in db.query(database.Schedule)
+        .filter(database.Schedule.user_id == user_id).all()
+    ]
     if schedule_ids:
-        db.query(database.AbsenceRequest).filter(database.AbsenceRequest.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
-    db.query(database.AbsenceRequest).filter(database.AbsenceRequest.user_id == user_id).delete(synchronize_session=False)
-    db.query(database.Schedule).filter(database.Schedule.user_id == user_id).delete(synchronize_session=False)
+        db.query(database.AbsenceRequest).filter(
+            database.AbsenceRequest.schedule_id.in_(schedule_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(database.AbsenceRequest).filter(
+        database.AbsenceRequest.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.query(database.Schedule).filter(
+        database.Schedule.user_id == user_id
+    ).delete(synchronize_session=False)
+
     db.delete(user)
     db.commit()
+
 
 @router.put("/admin/users/{user_id}/role", response_model=schemas.UserResponse, tags=["Admin"])
 def update_user_role(
@@ -223,17 +248,16 @@ def update_user_role(
     admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    """Admin cấp/thu hồi quyền admin cho user."""
     user = db.query(database.User).filter(database.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy user")
-    # Không cho tự đổi role của chính mình
     if user.id == admin.id:
         raise HTTPException(status_code=400, detail="Không thể thay đổi role của chính mình")
     user.role = payload.role
     db.commit()
     db.refresh(user)
     return user
+
 
 @router.put("/admin/users/{user_id}/department", response_model=schemas.UserResponse, tags=["Admin"])
 def update_user_department(
@@ -242,7 +266,6 @@ def update_user_department(
     admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    """Admin đổi department của user."""
     user = db.query(database.User).filter(database.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy user")
@@ -267,30 +290,35 @@ def create_absence_request(
     db.commit()
     return {"message": "Đã gửi yêu cầu chờ duyệt"}
 
+
 @router.get("/admin/absence-requests/", tags=["Admin"])
 def get_all_requests(
     admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    requests = db.query(database.AbsenceRequest).all()
+    requests = db.query(database.AbsenceRequest).order_by(
+        database.AbsenceRequest.created_at.desc()
+    ).all()
+
     result = []
     for r in requests:
-        user = db.query(database.User).filter(database.User.id == r.user_id).first()
+        user     = db.query(database.User).filter(database.User.id == r.user_id).first()
         schedule = db.query(database.Schedule).filter(database.Schedule.id == r.schedule_id).first()
         result.append({
             "id": r.id,
             "user_id": r.user_id,
-            "user_full_name": user.full_name if user else "?",
-            "user_username": user.username if user else "?",
-            "user_employee_code": user.employee_code if user else None,
-            "schedule_id": r.schedule_id,
-            "schedule_date": schedule.date.isoformat() if schedule and schedule.date else None,
-            "schedule_shift": schedule.shift.value if schedule and schedule.shift else None,
-            "reason": r.reason,
-            "status": r.status,
+            "user_full_name":    user.full_name     if user     else "?",
+            "user_username":     user.username      if user     else "?",
+            "user_employee_code": user.employee_code if user    else None,
+            "schedule_id":       r.schedule_id,
+            "schedule_date":     schedule.date.isoformat()   if schedule and schedule.date  else None,
+            "schedule_shift":    schedule.shift.value         if schedule and schedule.shift else None,
+            "reason":    r.reason,
+            "status":    r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None
         })
     return result
+
 
 @router.put("/admin/absence-requests/{req_id}/status", tags=["Admin"])
 def update_absence_status(
@@ -299,7 +327,10 @@ def update_absence_status(
     admin=Depends(auth.require_admin),
     db: Session = Depends(database.get_db)
 ):
-    req = db.query(database.AbsenceRequest).filter(database.AbsenceRequest.id == req_id).first()
+    req = db.query(database.AbsenceRequest).filter(
+        database.AbsenceRequest.id == req_id
+    ).first()
+
     if not req:
         raise HTTPException(status_code=404, detail="Không tìm thấy request")
     if req.status != "PENDING":
@@ -307,13 +338,19 @@ def update_absence_status(
 
     if payload.status == "ACCEPTED":
         schedule_id = req.schedule_id
-        req.status = "ACCEPTED"
+
+        # Bước 1: cập nhật request trước, flush để PostgreSQL ghi nhận
+        req.status      = "ACCEPTED"
         req.reviewed_at = datetime.utcnow()
-        sched_to_del = db.query(database.Schedule).filter(database.Schedule.id == schedule_id).first()
-        if sched_to_del:
-            db.delete(sched_to_del)
-    else:
-        req.status = "REJECTED"
+        db.flush()
+
+        # Bước 2: xóa schedule bằng query (không dùng db.delete để tránh FK cascade issue)
+        db.query(database.Schedule).filter(
+            database.Schedule.id == schedule_id
+        ).delete(synchronize_session=False)
+
+    else:  # REJECTED
+        req.status      = "REJECTED"
         req.reviewed_at = datetime.utcnow()
 
     db.commit()
