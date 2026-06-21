@@ -1,7 +1,7 @@
 # backend/routers.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from datetime import date, datetime, timedelta
 from typing import List
 import calendar
@@ -163,7 +163,7 @@ def delete_schedule(
     if schedule.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Không có quyền hủy lịch của người khác")
 
-    # Luật khóa 7 ngày — chỉ áp dụng cho user thường
+    # Luật khóa 7 ngày
     if current_user.role != "admin":
         today = date.today()
         sched_date = schedule.date
@@ -177,10 +177,7 @@ def delete_schedule(
 
 # ── ADMIN USERS ───────────────────────────────────────────────────────────────
 @router.get("/admin/users", response_model=List[schemas.UserResponse], tags=["Admin"])
-def get_all_users(
-    admin=Depends(auth.require_admin),
-    db: Session = Depends(database.get_db)
-):
+def get_all_users(admin=Depends(auth.require_admin), db: Session = Depends(database.get_db)):
     return db.query(database.User).all()
 
 
@@ -219,7 +216,6 @@ def delete_user(
     if user.role == "admin":
         raise HTTPException(status_code=400, detail="Không thể xóa tài khoản admin")
 
-    # Xóa absence_requests liên quan trước (PostgreSQL strict FK)
     schedule_ids = [
         s.id for s in db.query(database.Schedule)
         .filter(database.Schedule.user_id == user_id).all()
@@ -281,6 +277,20 @@ def create_absence_request(
     db: Session = Depends(database.get_db),
     current_user: database.User = Depends(auth.get_current_user)
 ):
+    # ── FIX 1: Chặn gửi nhiều request PENDING cho cùng 1 ca ──────────────────
+    existing_pending = db.query(database.AbsenceRequest).filter(
+        and_(
+            database.AbsenceRequest.schedule_id == req.schedule_id,
+            database.AbsenceRequest.user_id == current_user.id,
+            database.AbsenceRequest.status == "PENDING"
+        )
+    ).first()
+    if existing_pending:
+        raise HTTPException(
+            status_code=409,
+            detail="Bạn đã có yêu cầu xin vắng mặt đang chờ duyệt cho ca này rồi"
+        )
+
     new_request = database.AbsenceRequest(
         user_id=current_user.id,
         schedule_id=req.schedule_id,
@@ -307,12 +317,12 @@ def get_all_requests(
         result.append({
             "id": r.id,
             "user_id": r.user_id,
-            "user_full_name":    user.full_name     if user     else "?",
-            "user_username":     user.username      if user     else "?",
-            "user_employee_code": user.employee_code if user    else None,
-            "schedule_id":       r.schedule_id,
-            "schedule_date":     schedule.date.isoformat()   if schedule and schedule.date  else None,
-            "schedule_shift":    schedule.shift.value         if schedule and schedule.shift else None,
+            "user_full_name":     user.full_name      if user     else "?",
+            "user_username":      user.username        if user     else "?",
+            "user_employee_code": user.employee_code   if user     else None,
+            "schedule_id":        r.schedule_id,
+            "schedule_date":      schedule.date.isoformat()  if schedule and schedule.date  else None,
+            "schedule_shift":     schedule.shift.value        if schedule and schedule.shift else None,
             "reason":    r.reason,
             "status":    r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None
@@ -339,12 +349,23 @@ def update_absence_status(
     if payload.status == "ACCEPTED":
         schedule_id = req.schedule_id
 
-        # Bước 1: cập nhật request trước, flush để PostgreSQL ghi nhận
+        # ── FIX 2: Cập nhật request TRƯỚC, flush, rồi xóa schedule SAU ────────
+        # PostgreSQL strict FK: phải đảm bảo req không còn reference tới schedule
+        # trước khi xóa schedule. Dùng raw SQL để bypass ORM relationship check.
         req.status      = "ACCEPTED"
         req.reviewed_at = datetime.utcnow()
+        db.flush()  # ghi req vào transaction nhưng chưa commit
+
+        # Xóa tất cả absence_requests khác trỏ vào schedule này (nếu có)
+        db.query(database.AbsenceRequest).filter(
+            and_(
+                database.AbsenceRequest.schedule_id == schedule_id,
+                database.AbsenceRequest.id != req_id  # không xóa cái đang xử lý
+            )
+        ).delete(synchronize_session=False)
         db.flush()
 
-        # Bước 2: xóa schedule bằng query (không dùng db.delete để tránh FK cascade issue)
+        # Bây giờ xóa schedule an toàn
         db.query(database.Schedule).filter(
             database.Schedule.id == schedule_id
         ).delete(synchronize_session=False)
