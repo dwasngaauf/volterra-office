@@ -207,6 +207,12 @@ def delete_user(user_id: int, admin=Depends(auth.require_admin), db: Session = D
         raise HTTPException(status_code=404, detail="Không tìm thấy user")
     if user.role == "admin":
         raise HTTPException(status_code=400, detail="Không thể xóa tài khoản admin")
+    # Xóa absence_requests liên quan trước (PostgreSQL strict foreign key)
+    schedule_ids = [s.id for s in db.query(database.Schedule).filter(database.Schedule.user_id == user_id).all()]
+    if schedule_ids:
+        db.query(database.AbsenceRequest).filter(database.AbsenceRequest.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
+    db.query(database.AbsenceRequest).filter(database.AbsenceRequest.user_id == user_id).delete(synchronize_session=False)
+    db.query(database.Schedule).filter(database.Schedule.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
 
