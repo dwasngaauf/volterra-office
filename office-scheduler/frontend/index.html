@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đăng nhập — Volterra Office</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div id="toast-container"></div>
+<div class="login-page">
+  <div class="login-card">
+    <div class="login-logo-wrap">
+      <img src="/static/volterra-logo.png" alt="Volterra">
+    </div>
+    <h1 class="login-title">Volterra Office</h1>
+    <p class="login-sub">Đăng nhập để xem và đăng ký lịch làm việc</p>
+    <div class="error-msg" id="error-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Tên đăng nhập</label>
+      <input class="form-input" type="text" id="username" placeholder="username..." autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mật khẩu</label>
+      <input class="form-input" type="password" id="password" placeholder="mật khẩu..." autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="login-btn" onclick="doLogin()">Đăng nhập</button>
+  </div>
+</div>
+<script src="/static/js/api.js"></script>
+<script>
+  if (localStorage.getItem("token")) window.location.href = "/dashboard";
+  document.getElementById("password").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+
+  async function doLogin() {
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    const btn = document.getElementById("login-btn");
+    if (!username || !password) { showErr("Vui lòng nhập đầy đủ thông tin."); return; }
+    btn.disabled = true; btn.textContent = "Đang đăng nhập...";
+    document.getElementById("error-msg").classList.remove("show");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({username, password})
+      });
+      const data = await res.json();
+      if (!res.ok) { showErr(data.detail || "Đăng nhập thất bại."); return; }
+      saveAuth(data);
+      window.location.href = "/dashboard";
+    } catch { showErr("Không kết nối được server."); }
+    finally { btn.disabled=false; btn.textContent="Đăng nhập"; }
+  }
+  function showErr(msg) {
+    const el = document.getElementById("error-msg");
+    el.textContent = msg; el.classList.add("show");
+  }
+</script>
+</body>
+</html>
