@@ -73,16 +73,6 @@ class AbsenceRequest(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
 
-def _backfill_employee_codes(conn):
-    """Gán mã nhân viên cho các user cũ chưa có."""
-    rows = conn.execute(text("SELECT id FROM users WHERE employee_code IS NULL ORDER BY id")).fetchall()
-    for row in rows:
-        uid = row[0]
-        code = f"VOL{uid:03d}"
-        conn.execute(text("UPDATE users SET employee_code = :code WHERE id = :id"), {"code": code, "id": uid})
-    if rows:
-        conn.commit()
-
 def generate_employee_code(db) -> str:
     """Tạo mã nhân viên tiếp theo dạng VOL001."""
     from sqlalchemy import text as t
@@ -97,19 +87,28 @@ def get_db():
     finally:
         db.close()
 
-def init_db():
-    Base.metadata.create_all(bind=engine)
-    # Migration: thêm cột department nếu chưa có (upgrade từ DB cũ)
+def _add_column_if_not_exists(col_def: str):
+    """Thêm cột an toàn cho cả SQLite lẫn PostgreSQL."""
     with engine.connect() as conn:
         try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN department VARCHAR(20)"))
+            conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_def}"))
             conn.commit()
         except Exception:
-            pass  # Cột đã tồn tại
+            conn.rollback()  # PostgreSQL bắt buộc rollback khi lỗi
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    _add_column_if_not_exists("department VARCHAR(20)")
+    _add_column_if_not_exists("employee_code VARCHAR(20)")
+    # Backfill employee_code cho user cũ chưa có
+    with engine.connect() as conn:
         try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN employee_code VARCHAR(20)"))
-            conn.commit()
+            rows = conn.execute(text("SELECT id FROM users WHERE employee_code IS NULL ORDER BY id")).fetchall()
+            for row in rows:
+                uid = row[0]
+                code = f"VOL{uid:03d}"
+                conn.execute(text("UPDATE users SET employee_code = :code WHERE id = :id"), {"code": code, "id": uid})
+            if rows:
+                conn.commit()
         except Exception:
-            pass  # Cột đã tồn tại
-        # Backfill employee_code cho user cũ chưa có
-        _backfill_employee_codes(conn)
+            conn.rollback()
