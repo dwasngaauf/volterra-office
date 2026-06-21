@@ -63,7 +63,11 @@ def get_calendar(
         key = s.date.isoformat()
         if key not in schedule_map:
             schedule_map[key] = {h: [] for h in database.ALL_SHIFTS}
-        schedule_map[key][s.shift.value].append(s)
+        
+        # An toàn xử lý cả trường hợp shift là object Enum hoặc chuỗi
+        shift_val = s.shift.value if hasattr(s.shift, 'value') else s.shift
+        if shift_val in schedule_map[key]:
+            schedule_map[key][shift_val].append(s)
 
     days = []
     for day_num in range(1, last_day.day + 1):
@@ -128,18 +132,20 @@ def create_schedule(
     current_user: database.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db)
 ):
+    shift_val = payload.shift.value if hasattr(payload.shift, 'value') else payload.shift
     existing = db.query(database.Schedule).filter(
         and_(
             database.Schedule.user_id == current_user.id,
             database.Schedule.date == payload.date,
-            database.Schedule.shift == payload.shift
+            database.Schedule.shift == shift_val
         )
     ).first()
+    
     if existing:
         raise HTTPException(status_code=409, detail="Bạn đã đăng ký khung giờ này rồi")
 
     new_schedule = database.Schedule(
-        user_id=current_user.id, date=payload.date, shift=payload.shift
+        user_id=current_user.id, date=payload.date, shift=shift_val
     )
     db.add(new_schedule)
     db.commit()
@@ -163,7 +169,6 @@ def delete_schedule(
     if schedule.user_id != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Không có quyền hủy lịch của người khác")
 
-    # Luật khóa 7 ngày
     if current_user.role != "admin":
         today = date.today()
         sched_date = schedule.date
@@ -179,7 +184,6 @@ def delete_schedule(
 @router.get("/admin/users", response_model=List[schemas.UserResponse], tags=["Admin"])
 def get_all_users(admin=Depends(auth.require_admin), db: Session = Depends(database.get_db)):
     return db.query(database.User).all()
-
 
 @router.post("/admin/users", response_model=schemas.UserResponse, tags=["Admin"])
 def create_user(
@@ -202,7 +206,6 @@ def create_user(
     db.commit()
     db.refresh(new_user)
     return new_user
-
 
 @router.delete("/admin/users/{user_id}", status_code=204, tags=["Admin"])
 def delete_user(
@@ -236,7 +239,6 @@ def delete_user(
     db.delete(user)
     db.commit()
 
-
 @router.put("/admin/users/{user_id}/role", response_model=schemas.UserResponse, tags=["Admin"])
 def update_user_role(
     user_id: int,
@@ -253,7 +255,6 @@ def update_user_role(
     db.commit()
     db.refresh(user)
     return user
-
 
 @router.put("/admin/users/{user_id}/department", response_model=schemas.UserResponse, tags=["Admin"])
 def update_user_department(
@@ -277,7 +278,6 @@ def create_absence_request(
     db: Session = Depends(database.get_db),
     current_user: database.User = Depends(auth.get_current_user)
 ):
-    # ── FIX 1: Chặn gửi nhiều request PENDING cho cùng 1 ca ──────────────────
     existing_pending = db.query(database.AbsenceRequest).filter(
         and_(
             database.AbsenceRequest.schedule_id == req.schedule_id,
@@ -291,9 +291,18 @@ def create_absence_request(
             detail="Bạn đã có yêu cầu xin vắng mặt đang chờ duyệt cho ca này rồi"
         )
 
+    # Lưu cứng date/shift để giữ lại lịch sử nếu admin duyệt xóa lịch
+    schedule = db.query(database.Schedule).filter(database.Schedule.id == req.schedule_id).first()
+    
+    sch_shift_val = None
+    if schedule:
+        sch_shift_val = schedule.shift.value if hasattr(schedule.shift, 'value') else schedule.shift
+
     new_request = database.AbsenceRequest(
         user_id=current_user.id,
         schedule_id=req.schedule_id,
+        schedule_date=schedule.date.isoformat() if schedule else None,
+        schedule_shift=sch_shift_val,
         reason=req.reason
     )
     db.add(new_request)
@@ -314,6 +323,15 @@ def get_all_requests(
     for r in requests:
         user     = db.query(database.User).filter(database.User.id == r.user_id).first()
         schedule = db.query(database.Schedule).filter(database.Schedule.id == r.schedule_id).first()
+        
+        # Ưu tiên lấy date/shift lưu cứng (hoặc lấy từ schedule nếu DB cũ chưa có)
+        sch_shift_val = None
+        if schedule:
+            sch_shift_val = schedule.shift.value if hasattr(schedule.shift, 'value') else schedule.shift
+            
+        final_date = r.schedule_date or (schedule.date.isoformat() if schedule and schedule.date else "?")
+        final_shift = r.schedule_shift or (sch_shift_val or "?")
+
         result.append({
             "id": r.id,
             "user_id": r.user_id,
@@ -321,8 +339,8 @@ def get_all_requests(
             "user_username":      user.username        if user     else "?",
             "user_employee_code": user.employee_code   if user     else None,
             "schedule_id":        r.schedule_id,
-            "schedule_date":      schedule.date.isoformat()  if schedule and schedule.date  else None,
-            "schedule_shift":     schedule.shift.value        if schedule and schedule.shift else None,
+            "schedule_date":      final_date,
+            "schedule_shift":     final_shift,
             "reason":    r.reason,
             "status":    r.status,
             "created_at": r.created_at.isoformat() if r.created_at else None
@@ -349,30 +367,30 @@ def update_absence_status(
     if payload.status == "ACCEPTED":
         schedule_id = req.schedule_id
 
-        # ── FIX 2: Cập nhật request TRƯỚC, flush, rồi xóa schedule SAU ────────
-        # PostgreSQL strict FK: phải đảm bảo req không còn reference tới schedule
-        # trước khi xóa schedule. Dùng raw SQL để bypass ORM relationship check.
+        # 1. Cập nhật request, TÁCH RỜI KHÓA NGOẠI schedule_id để xóa schedule mà không dính lỗi
         req.status      = "ACCEPTED"
         req.reviewed_at = datetime.utcnow()
-        db.flush()  # ghi req vào transaction nhưng chưa commit
+        req.schedule_id = None  
+        db.commit()  # Ghi đè vào DB trước
 
-        # Xóa tất cả absence_requests khác trỏ vào schedule này (nếu có)
-        db.query(database.AbsenceRequest).filter(
-            and_(
-                database.AbsenceRequest.schedule_id == schedule_id,
-                database.AbsenceRequest.id != req_id  # không xóa cái đang xử lý
-            )
-        ).delete(synchronize_session=False)
-        db.flush()
+        if schedule_id:
+            # 2. Xóa các request khác bám vào schedule_id này
+            db.query(database.AbsenceRequest).filter(
+                and_(
+                    database.AbsenceRequest.schedule_id == schedule_id,
+                    database.AbsenceRequest.id != req_id
+                )
+            ).delete(synchronize_session=False)
 
-        # Bây giờ xóa schedule an toàn
-        db.query(database.Schedule).filter(
-            database.Schedule.id == schedule_id
-        ).delete(synchronize_session=False)
+            # 3. Xóa lịch một cách an toàn
+            db.query(database.Schedule).filter(
+                database.Schedule.id == schedule_id
+            ).delete(synchronize_session=False)
+            db.commit()
 
-    else:  # REJECTED
+    else:
         req.status      = "REJECTED"
         req.reviewed_at = datetime.utcnow()
+        db.commit()
 
-    db.commit()
     return {"message": f"Đã cập nhật trạng thái thành {payload.status}"}
