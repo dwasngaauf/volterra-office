@@ -200,8 +200,9 @@ async function bookOrCancelDay(dateStr, calData, action) {
       if (res && (res.ok || res.status === 409)) ok++; else fail++;
     } else {
       if (!sd.has_registered || !sd.schedule_id) { ok++; continue; }
-      const success = await cancelScheduleWithLock(sd.schedule_id, dateStr);
-      if (success) ok++; else fail++;
+      const result = await cancelScheduleWithLock(sd.schedule_id, dateStr);
+      // Chấp nhận cả true (hủy thẳng) và "ABSENCE_SENT" (gửi đơn) là xử lý thành công cho ca này
+      if (result === true || result === "ABSENCE_SENT") ok++; else fail++;
     }
   }
 
@@ -225,10 +226,18 @@ async function cancelScheduleWithLock(scheduleId, dateStr) {
             method: "POST",
             body: JSON.stringify({ schedule_id: scheduleId, reason: reason.trim() })
           });
+          
           if (reqRes && reqRes.ok) {
             showToast("Đã gửi yêu cầu xin vắng mặt thành công!", "success");
+            return "ABSENCE_SENT";
           } else {
-            showToast("Lỗi khi gửi yêu cầu vắng mặt", "error");
+            // kiểm tra duplicate
+            if (reqRes && reqRes.status === 409) {
+              showToast("Bạn đã có yêu cầu đang chờ duyệt cho ca này rồi!", "error");
+            } else {
+              showToast("Lỗi khi gửi yêu cầu vắng mặt", "error");
+            }
+            return false;
           }
         } else if (reason !== null) {
           showToast("Lý do không được để trống", "error");
