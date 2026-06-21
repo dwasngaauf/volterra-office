@@ -20,6 +20,11 @@
   --warning:     #d97706;
   --success:     #16a34a;
 
+  /* Department colors */
+  --dept-hardware: #f97316;
+  --dept-software: #ec4899;
+  --dept-business: #3b82f6;
+
   --radius:      12px;
   --radius-sm:   7px;
   --shadow:      0 1px 4px rgba(46,177,163,.10), 0 1px 2px rgba(0,0,0,.04);
@@ -94,6 +99,16 @@ input,select,textarea{font-family:inherit}
 }
 .logout-btn:hover{background:#fff0f0}
 
+/* ── Sidebar action buttons ── */
+.sidebar-action-btn{
+  width:100%;padding:8px 11px;border-radius:var(--radius-sm);
+  color:var(--text-muted);font-size:13px;font-weight:500;
+  display:flex;align-items:center;gap:8px;
+  transition:background var(--transition);
+  margin-bottom:2px;
+}
+.sidebar-action-btn:hover{background:var(--brand-light);color:var(--brand-dark)}
+
 /* ── Main ── */
 .main-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .topbar{
@@ -151,7 +166,7 @@ input,select,textarea{font-family:inherit}
 }
 
 /* Week view */
-.week-grid{display:grid;grid-template-columns:56px repeat(7,1fr)}
+.week-grid{display:grid;grid-template-columns:72px repeat(7,1fr)}
 .week-header-row{display:contents}
 .wh-corner{background:var(--surface-2);border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
 .wh-day{
@@ -169,6 +184,16 @@ input,select,textarea{font-family:inherit}
 .wh-day.weekend .dow,.wh-day.weekend .dom{color:var(--danger);opacity:.75}
 .wh-day.today.weekend .dom{background:var(--danger);color:#fff;opacity:1}
 
+/* Header cell "Chọn cả ngày" */
+.wh-day-inner{display:flex;flex-direction:column;align-items:center;gap:2px}
+.day-book-btn{
+  font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;
+  background:var(--brand-light);color:var(--brand-dark);
+  cursor:pointer;transition:all var(--transition);white-space:nowrap;margin-top:3px;
+  border:1px solid var(--brand-mid);
+}
+.day-book-btn:hover{background:var(--brand);color:#fff}
+
 /* Time rows */
 .time-label{
   border-right:1px solid var(--border);border-bottom:1px solid var(--border);
@@ -179,7 +204,7 @@ input,select,textarea{font-family:inherit}
 }
 .cal-cell{
   border-right:1px solid var(--border);border-bottom:1px solid var(--border);
-  min-height:52px;padding:3px;position:relative;
+  min-height:64px;padding:3px;position:relative;
   transition:background var(--transition);cursor:pointer;
 }
 .cal-cell:last-child{border-right:none}
@@ -187,10 +212,16 @@ input,select,textarea{font-family:inherit}
 .cal-cell.registered{background:#e6f7f6}
 .cal-cell.past{opacity:.5;cursor:default;pointer-events:none}
 
+/* ── Department bar ── */
+.dept-bar{
+  display:flex;height:4px;border-radius:2px;overflow:hidden;
+  margin-bottom:3px;width:100%;
+}
+
+/* ── Slot chip ── */
 .slot-chip{
   display:flex;align-items:center;justify-content:space-between;
   padding:3px 6px;border-radius:5px;font-size:11px;font-weight:600;
-  background:var(--brand);color:#fff;
   gap:4px;cursor:pointer;
 }
 .slot-chip .chip-count{
@@ -236,6 +267,14 @@ input,select,textarea{font-family:inherit}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .month-pill.has-me{background:var(--brand);color:#fff}
+
+/* ── Department badge ── */
+.dept-badge{
+  display:inline-flex;align-items:center;
+  padding:1px 7px;border-radius:20px;
+  font-size:10px;font-weight:600;
+  white-space:nowrap;
+}
 
 /* ── Modal ── */
 .modal-overlay{
@@ -358,6 +397,11 @@ select.form-input{background:var(--surface)}
 /* ── Drag select highlight ── */
 .cal-cell.drag-over{background:var(--brand-mid)!important;outline:2px solid var(--brand)}
 
+/* ── Dept legend ── */
+.dept-legend{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.dept-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:500;color:var(--text-muted)}
+.dept-legend-dot{width:10px;height:10px;border-radius:50%}
+
 /* ── Mobile ── */
 @media(max-width:768px){
   .sidebar{
@@ -372,7 +416,7 @@ select.form-input{background:var(--surface)}
   .hamburger{display:flex}
   .content-area{padding:14px}
   .topbar{padding:0 14px}
-  .week-grid{grid-template-columns:40px repeat(7,1fr)}
+  .week-grid{grid-template-columns:44px repeat(7,1fr)}
   .stats-bar{gap:6px}
   .stat-card{min-width:90px;padding:10px 12px}
   .stat-value{font-size:1.2rem}
