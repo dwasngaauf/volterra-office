@@ -30,6 +30,15 @@
       <input class="form-input" type="password" id="f-pass" placeholder="Tối thiểu 6 ký tự">
     </div>
     <div class="form-group">
+      <label class="form-label">Bộ phận</label>
+      <select class="form-input" id="f-dept">
+        <option value="">— Chưa xác định —</option>
+        <option value="business">Business</option>
+        <option value="hardware">Hardware</option>
+        <option value="software">Software</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">Vai trò</label>
       <select class="form-input" id="f-role">
         <option value="user">Người dùng</option>
@@ -39,6 +48,32 @@
     <div class="modal-action">
       <button class="btn btn-outline" onclick="closeAdd()">Hủy</button>
       <button class="btn btn-primary" onclick="createUser()">Tạo tài khoản</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Password Modal (admin cũng có thể đổi mật khẩu của mình) -->
+<div class="modal-overlay" id="pw-modal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <h3>Đổi mật khẩu</h3>
+      <button class="modal-close" onclick="closePwModal()">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mật khẩu hiện tại</label>
+      <input class="form-input" type="password" id="pw-old" placeholder="Nhập mật khẩu hiện tại">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Mật khẩu mới</label>
+      <input class="form-input" type="password" id="pw-new" placeholder="Tối thiểu 6 ký tự">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Xác nhận mật khẩu mới</label>
+      <input class="form-input" type="password" id="pw-confirm" placeholder="Nhập lại mật khẩu mới">
+    </div>
+    <div class="modal-action">
+      <button class="btn btn-outline" onclick="closePwModal()">Hủy</button>
+      <button class="btn btn-primary" onclick="doChangePassword()">Đổi mật khẩu</button>
     </div>
   </div>
 </div>
@@ -64,6 +99,7 @@
           <div class="user-card-role">Quản trị viên</div>
         </div>
       </div>
+      <button class="sidebar-action-btn" onclick="openPwModal()"><span>🔑</span>Đổi mật khẩu</button>
       <button class="logout-btn" onclick="logout()"><span>🚪</span>Đăng xuất</button>
     </div>
   </aside>
@@ -81,19 +117,28 @@
         + Thêm nhân sự
       </button>
     </div>
-    
+
     <div class="content-area">
+      <!-- Bảng nhân sự -->
       <div class="table-card">
         <table class="data-table">
           <thead>
-            <tr><th>#</th><th>Họ và tên</th><th>Username</th><th>Vai trò</th><th>Thao tác</th></tr>
+            <tr>
+              <th>Mã NV</th>
+              <th>Họ và tên</th>
+              <th>Username</th>
+              <th>Bộ phận</th>
+              <th>Vai trò</th>
+              <th>Thao tác</th>
+            </tr>
           </thead>
           <tbody id="tbody">
-            <tr><td colspan="5" style="text-align:center;padding:32px"><div class="loader" style="margin:auto"></div></td></tr>
+            <tr><td colspan="6" style="text-align:center;padding:32px"><div class="loader" style="margin:auto"></div></td></tr>
           </tbody>
         </table>
       </div>
 
+      <!-- Bảng vắng mặt -->
       <div class="topbar-left" style="padding: 24px 0 12px 0;">
         <div>
           <div class="topbar-title">Yêu cầu xin vắng mặt</div>
@@ -104,11 +149,11 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>Mã NV</th>
-              <th>Mã Lịch</th>
-              <th>Lý do xin vắng mặt</th>
+              <th>Nhân viên</th>
+              <th>Ca muốn nghỉ</th>
+              <th>Lý do</th>
               <th>Trạng thái</th>
-              <th>Thao tác xử lý</th>
+              <th>Xử lý</th>
             </tr>
           </thead>
           <tbody id="tbody-requests">
@@ -116,52 +161,136 @@
           </tbody>
         </table>
       </div>
-    </div> </div> </div> <script src="/static/js/api.js"></script>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/api.js"></script>
 <script>
 const admin = requireAdmin();
 if (admin) {
-  document.getElementById("sb-avatar").textContent = getInitial(admin.full_name);
+  const deptColor = admin.department ? DEPT_COLORS[admin.department] : null;
+  const avatarEl = document.getElementById("sb-avatar");
+  avatarEl.textContent = getInitial(admin.full_name);
+  if (deptColor) avatarEl.style.background = deptColor;
   document.getElementById("sb-name").textContent = admin.full_name;
   loadUsers();
-  loadRequests(); // <-- ĐÃ SỬA: Thêm chữ 's' ở đây để không bị crash
+  loadRequests();
 }
 
-function openSidebar() { document.getElementById("sidebar").classList.add("open"); document.getElementById("sidebar-overlay").classList.add("open"); }
+function openSidebar()  { document.getElementById("sidebar").classList.add("open"); document.getElementById("sidebar-overlay").classList.add("open"); }
 function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); document.getElementById("sidebar-overlay").classList.remove("open"); }
 
+// ── Change Password ────────────────────────────────────────────────────────
+function openPwModal() {
+  ["pw-old","pw-new","pw-confirm"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("pw-modal").classList.add("open");
+}
+function closePwModal() { document.getElementById("pw-modal").classList.remove("open"); }
+document.getElementById("pw-modal").addEventListener("click", e => { if (e.target === e.currentTarget) closePwModal(); });
+
+async function doChangePassword() {
+  const oldPass     = document.getElementById("pw-old").value;
+  const newPass     = document.getElementById("pw-new").value;
+  const confirmPass = document.getElementById("pw-confirm").value;
+  if (!oldPass || !newPass || !confirmPass) { showToast("Điền đầy đủ thông tin", "error"); return; }
+  if (newPass.length < 6) { showToast("Mật khẩu mới phải có ít nhất 6 ký tự", "error"); return; }
+  if (newPass !== confirmPass) { showToast("Mật khẩu xác nhận không khớp", "error"); return; }
+  const res = await changePassword(oldPass, newPass);
+  if (res && res.ok) { showToast("Đổi mật khẩu thành công!"); closePwModal(); }
+  else if (res) { const e = await res.json(); showToast(e.detail || "Lỗi đổi mật khẩu", "error"); }
+}
+
+// ── Load users ─────────────────────────────────────────────────────────────
 async function loadUsers() {
   const res = await apiFetch("/admin/users");
   const users = await res.json();
   const tbody = document.getElementById("tbody");
-  if (!users.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="text-align:center;padding:24px">Chưa có nhân sự</td></tr>`; return; }
-  tbody.innerHTML = users.map((u,i) => `
-    <tr>
-      <td class="text-muted" style="color:var(--text-muted)">${i+1}</td>
-      <td><div style="display:flex;align-items:center;gap:9px">
-        <div class="avatar" style="width:28px;height:28px;font-size:11px">${getInitial(u.full_name)}</div>
-        <span style="font-weight:500">${u.full_name}</span>
-      </div></td>
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center;padding:24px">Chưa có nhân sự</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = users.map((u,i) => {
+    const deptColor = u.department ? DEPT_COLORS[u.department] : "var(--brand)";
+    const isMe = u.id === admin.id;
+    return `<tr>
+      <td style="color:var(--text-muted);font-weight:600;font-size:12px">${u.employee_code || "-"}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:9px">
+          <div class="avatar" style="width:28px;height:28px;font-size:11px;background:${deptColor}">${getInitial(u.full_name)}</div>
+          <div>
+            <div style="font-weight:500">${u.full_name}${isMe?" <span style='font-size:10px;color:var(--brand)'>(Bạn)</span>":""}</div>
+          </div>
+        </div>
+      </td>
       <td style="color:var(--text-muted)">${u.username}</td>
-      <td><span class="badge ${u.role==="admin"?"badge-admin":"badge-user"}">${u.role==="admin"?"Admin":"Nhân sự"}</span></td>
-      <td>${u.role!=="admin"
-        ? `<button class="btn btn-sm" style="color:var(--danger)" onclick="deleteUser(${u.id},'${u.full_name}')">Xóa</button>`
-        : `<span style="color:var(--text-light);font-size:12px">—</span>`}</td>
-    </tr>`).join("");
+      <td>
+        <select class="form-input" style="padding:4px 8px;font-size:12px;width:auto"
+          onchange="changeDept(${u.id}, this.value)">
+          <option value="" ${!u.department?"selected":""}>—</option>
+          <option value="business" ${u.department==="business"?"selected":""}>Business</option>
+          <option value="hardware" ${u.department==="hardware"?"selected":""}>Hardware</option>
+          <option value="software" ${u.department==="software"?"selected":""}>Software</option>
+        </select>
+      </td>
+      <td>
+        ${isMe
+          ? `<span class="badge badge-admin">Admin</span>`
+          : `<select class="form-input" style="padding:4px 8px;font-size:12px;width:auto"
+              onchange="changeRole(${u.id}, this.value)">
+              <option value="user"  ${u.role==="user" ?"selected":""}>Nhân sự</option>
+              <option value="admin" ${u.role==="admin"?"selected":""}>Admin</option>
+            </select>`
+        }
+      </td>
+      <td>
+        ${!isMe
+          ? `<button class="btn btn-sm" style="color:var(--danger)" onclick="deleteUser(${u.id},'${u.full_name}')">Xóa</button>`
+          : `<span style="color:var(--text-light);font-size:12px">—</span>`
+        }
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+async function changeDept(userId, dept) {
+  if (!dept) return; // bỏ qua nếu chọn "—"
+  const res = await apiFetch(`/admin/users/${userId}/department`, {
+    method: "PUT", body: JSON.stringify({ department: dept })
+  });
+  if (res && res.ok) showToast("Đã cập nhật bộ phận");
+  else showToast("Lỗi cập nhật bộ phận", "error");
+  loadUsers();
+}
+
+async function changeRole(userId, role) {
+  const res = await apiFetch(`/admin/users/${userId}/role`, {
+    method: "PUT", body: JSON.stringify({ role })
+  });
+  if (res && res.ok) showToast(`Đã cập nhật vai trò thành ${role === "admin" ? "Admin" : "Nhân sự"}`);
+  else { const e = await res.json(); showToast(e.detail || "Lỗi cập nhật vai trò", "error"); }
+  loadUsers();
 }
 
 function closeAdd() {
   document.getElementById("add-modal").classList.remove("open");
   ["f-name","f-user","f-pass"].forEach(id => document.getElementById(id).value="");
+  document.getElementById("f-dept").value = "";
+  document.getElementById("f-role").value = "user";
 }
 
 async function createUser() {
-  const full_name = document.getElementById("f-name").value.trim();
-  const username  = document.getElementById("f-user").value.trim();
-  const password  = document.getElementById("f-pass").value;
-  const role      = document.getElementById("f-role").value;
+  const full_name  = document.getElementById("f-name").value.trim();
+  const username   = document.getElementById("f-user").value.trim();
+  const password   = document.getElementById("f-pass").value;
+  const role       = document.getElementById("f-role").value;
+  const department = document.getElementById("f-dept").value || null;
   if (!full_name||!username||!password) { showToast("Điền đầy đủ thông tin","error"); return; }
   if (password.length<6) { showToast("Mật khẩu tối thiểu 6 ký tự","error"); return; }
-  const res = await apiFetch("/admin/users",{method:"POST",body:JSON.stringify({username,password,full_name,role})});
+  const res = await apiFetch("/admin/users",{
+    method:"POST",
+    body:JSON.stringify({username, password, full_name, role, department})
+  });
   if (res.ok) { showToast(`Đã tạo tài khoản cho ${full_name}`); closeAdd(); loadUsers(); }
   else { const e=await res.json(); showToast(e.detail||"Lỗi tạo tài khoản","error"); }
 }
@@ -172,53 +301,59 @@ async function deleteUser(id, name) {
   if (res.ok||res.status===204) { showToast(`Đã xóa ${name}`); loadUsers(); }
   else showToast("Xóa thất bại","error");
 }
+
 document.getElementById("add-modal").addEventListener("click",e=>{if(e.target===e.currentTarget)closeAdd()});
 
-// ── XỬ LÝ LOGIC DUYỆT VẮNG MẶT CỦA ADMIN ─────────────────────────────────────
+// ── Absence requests ───────────────────────────────────────────────────────
 async function loadRequests() {
-  const requests = await getAbsenceRequests(); 
+  const requests = await getAbsenceRequests();
   const tbody = document.getElementById("tbody-requests");
-  
+
   if (!requests || !requests.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="text-align:center;padding:24px">Không có yêu cầu xin vắng mặt nào cần xử lý 🏖️</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state" style="text-align:center;padding:24px">Không có yêu cầu xin vắng mặt nào 🏖️</td></tr>`;
     return;
   }
-  
+
   tbody.innerHTML = requests.map(r => {
     let statusBadge = "";
-    if (r.status === "PENDING") {
-      statusBadge = `<span class="badge" style="background:var(--warning);color:#fff">Chờ duyệt</span>`;
-    } else if (r.status === "ACCEPTED") {
-      statusBadge = `<span class="badge" style="background:var(--success);color:#fff">Đã chấp nhận</span>`;
-    } else {
-      statusBadge = `<span class="badge" style="background:var(--danger);color:#fff">Đã từ chối</span>`;
-    }
+    if (r.status === "PENDING")
+      statusBadge = `<span class="badge" style="background:#fef9c3;color:#854d0e">Chờ duyệt</span>`;
+    else if (r.status === "ACCEPTED")
+      statusBadge = `<span class="badge" style="background:#dcfce7;color:#15803d">Đã duyệt</span>`;
+    else
+      statusBadge = `<span class="badge" style="background:#fee2e2;color:#b91c1c">Đã từ chối</span>`;
 
     const actionButtons = r.status === "PENDING"
-      ? `<button class="btn btn-sm btn-primary" onclick="handleRequest(${r.id}, 'ACCEPTED')">Duyệt nghỉ</button>
-         <button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="handleRequest(${r.id}, 'REJECTED')">Từ chối</button>`
-      : `<span style="color:var(--text-light);font-size:12px">Đã xử lý xong</span>`;
+      ? `<button class="btn btn-sm btn-primary" onclick="handleRequest(${r.id},'ACCEPTED')">Duyệt</button>
+         <button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="handleRequest(${r.id},'REJECTED')">Từ chối</button>`
+      : `<span style="color:var(--text-light);font-size:12px">Đã xử lý</span>`;
 
-    return `
-      <tr>
-        <td style="font-weight:600;color:var(--brand-dark)">ID: ${r.user_id}</td>
-        <td class="text-muted">ID Lịch: ${r.schedule_id}</td>
-        <td><span style="font-style:italic;color:var(--text-muted)">"${r.reason}"</span></td>
-        <td>${statusBadge}</td>
-        <td><div style="display:flex;gap:6px">${actionButtons}</div></td>
-      </tr>
-    `;
+    const dateLabel = r.schedule_date ? (() => { const [y,m,d]=r.schedule_date.split("-"); return `${d}/${m}/${y}`; })() : "?";
+
+    return `<tr>
+      <td>
+        <div style="font-weight:600">${r.user_full_name}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${r.user_employee_code || ("VOL" + String(r.user_id).padStart(3,"0"))}</div>
+      </td>
+      <td>
+        <div style="font-weight:500">${r.schedule_shift || "?"}</div>
+        <div style="font-size:11px;color:var(--text-muted)">Ngày ${dateLabel}</div>
+      </td>
+      <td><span style="font-style:italic;color:var(--text-muted)">"${r.reason}"</span></td>
+      <td>${statusBadge}</td>
+      <td><div style="display:flex;gap:6px">${actionButtons}</div></td>
+    </tr>`;
   }).join("");
 }
 
 async function handleRequest(reqId, status) {
-  const confirmMsg = status === 'ACCEPTED' ? "Chấp nhận yêu cầu này và xoá lịch trực của nhân viên?" : "Từ chối yêu cầu và giữ nguyên lịch trực?";
+  const confirmMsg = status === "ACCEPTED"
+    ? "Chấp nhận yêu cầu và xoá lịch trực của nhân viên?"
+    : "Từ chối yêu cầu và giữ nguyên lịch trực?";
   if (!confirm(confirmMsg)) return;
-  
-  const success = await updateRequestStatus(reqId, status); 
-  if (success) {
-    loadRequests(); 
-    if (typeof loadUsers === "function") loadUsers(); 
-  }
+  const success = await updateRequestStatus(reqId, status);
+  if (success) loadRequests();
 }
 </script>
+</body>
+</html>
