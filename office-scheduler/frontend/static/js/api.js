@@ -72,9 +72,9 @@ const SHIFT_LABELS = {
 
 // ── Department colors ──────────────────────────────────────────────────────
 const DEPT_COLORS = {
-  hardware: "#f97316",   // cam
-  software: "#ec4899",   // hồng
-  business: "#3b82f6",   // xanh nước biển
+  hardware: "#f97316",
+  software: "#ec4899",
+  business: "#3b82f6",
 };
 const DEPT_LABELS = {
   hardware: "Hardware",
@@ -83,10 +83,6 @@ const DEPT_LABELS = {
 };
 const DEPT_ORDER = ["business", "hardware", "software"];
 
-/**
- * Render thanh màu 3 phân khúc dựa trên dept_counts.
- * Trả về HTML string của element .dept-bar
- */
 function renderDeptBar(deptCounts, total) {
   if (!total || total === 0) return "";
   const hw  = (deptCounts && deptCounts.hardware)  ? deptCounts.hardware  : 0;
@@ -94,7 +90,6 @@ function renderDeptBar(deptCounts, total) {
   const biz = (deptCounts && deptCounts.business)  ? deptCounts.business  : 0;
   const known = hw + sw + biz;
 
-  // Nếu không ai có dept -> bar xám toàn bộ
   if (known === 0) {
     return `<div style="height:6px;border-radius:3px;background:#e2e8f0;margin-bottom:3px;width:100%"></div>`;
   }
@@ -112,9 +107,6 @@ function renderDeptBar(deptCounts, total) {
   return `<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-bottom:3px;width:100%;gap:1px">${segments}</div>`;
 }
 
-/**
- * Render badge màu department cho một user
- */
 function renderDeptBadge(department) {
   if (!department) return "";
   const color = DEPT_COLORS[department] || "#94a3b8";
@@ -122,9 +114,6 @@ function renderDeptBadge(department) {
   return `<span class="dept-badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${label}</span>`;
 }
 
-/**
- * Render avatar có màu department
- */
 function renderAvatar(name, department, size = "") {
   const color = department ? DEPT_COLORS[department] : "var(--brand)";
   const sizeStyle = size === "sm" ? "width:24px;height:24px;font-size:10px" : "";
@@ -192,10 +181,6 @@ async function updateUserDepartment(userId, department) {
 }
 
 // ── BOOK/CANCEL CẢ NGÀY ───────────────────────────────────────────────────
-/**
- * Đăng ký hoặc hủy tất cả ca trong một ngày.
- * action: "book" | "cancel"
- */
 async function bookOrCancelDay(dateStr, calData, action) {
   const dayData = calData[dateStr];
   if (!dayData?.shifts) return { ok: 0, fail: 0 };
@@ -207,7 +192,7 @@ async function bookOrCancelDay(dateStr, calData, action) {
     if (!sd) continue;
 
     if (action === "book") {
-      if (sd.has_registered) { ok++; continue; } // đã đăng ký rồi
+      if (sd.has_registered) { ok++; continue; }
       const res = await apiFetch("/schedules", {
         method: "POST",
         body: JSON.stringify({ date: dateStr, shift })
@@ -231,7 +216,10 @@ async function cancelScheduleWithLock(scheduleId, dateStr) {
     if (res && res.status === 403) {
       const errorData = await res.json();
       if (errorData.detail === "LOCKED_7_DAYS") {
-        const reason = prompt(`Lịch ngày ${dateStr} đã bị khóa (dưới 7 ngày).\nBạn có việc đột xuất? Vui lòng nhập lý do xin vắng mặt để Admin duyệt:`);
+        const reason = prompt(
+          `Lịch ngày ${dateStr} đã bị khóa (dưới 7 ngày).\n` +
+          `Bạn có việc đột xuất? Vui lòng nhập lý do xin vắng mặt để Admin duyệt:`
+        );
         if (reason && reason.trim() !== "") {
           const reqRes = await apiFetch("/absence-requests/", {
             method: "POST",
@@ -239,7 +227,6 @@ async function cancelScheduleWithLock(scheduleId, dateStr) {
           });
           if (reqRes && reqRes.ok) {
             showToast("Đã gửi yêu cầu xin vắng mặt thành công!", "success");
-            return false;
           } else {
             showToast("Lỗi khi gửi yêu cầu vắng mặt", "error");
           }
@@ -248,12 +235,12 @@ async function cancelScheduleWithLock(scheduleId, dateStr) {
         }
         return false;
       } else {
-        showToast(errorData.detail, "error");
+        showToast(errorData.detail || "Không có quyền hủy lịch", "error");
         return false;
       }
     }
 
-    if (res && res.ok) {
+    if (res && (res.ok || res.status === 204)) {
       showToast("Hủy lịch thành công!", "success");
       return true;
     }
@@ -280,8 +267,11 @@ async function updateRequestStatus(reqId, newStatus) {
     showToast("Đã cập nhật trạng thái", "success");
     return true;
   }
-  const errorText = await res.text();
-  console.error("Lỗi từ server:", errorText);
-  showToast("Lỗi khi cập nhật trạng thái", "error");
+  try {
+    const err = await res.json();
+    showToast(err.detail || "Lỗi khi cập nhật trạng thái", "error");
+  } catch {
+    showToast("Lỗi khi cập nhật trạng thái", "error");
+  }
   return false;
 }
