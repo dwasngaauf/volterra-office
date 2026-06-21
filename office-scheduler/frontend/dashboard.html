@@ -10,7 +10,6 @@
 <div id="toast-container"></div>
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
-<!-- ── Detail Modal ── -->
 <div class="modal-overlay" id="detail-modal">
   <div class="modal">
     <div class="modal-header">
@@ -26,7 +25,6 @@
   </div>
 </div>
 
-<!-- ── Change Password Modal ── -->
 <div class="modal-overlay" id="pw-modal">
   <div class="modal" style="max-width:380px">
     <div class="modal-header">
@@ -53,7 +51,6 @@
 </div>
 
 <div class="app-layout">
-  <!-- ── Sidebar ── -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
       <img src="/static/volterra-logo.png" alt="Volterra">
@@ -79,7 +76,6 @@
     </div>
   </aside>
 
-  <!-- ── Main ── -->
   <div class="main-content">
     <div class="topbar">
       <div class="topbar-left">
@@ -98,14 +94,12 @@
     </div>
 
     <div class="content-area">
-      <!-- Stats -->
       <div class="stats-bar">
         <div class="stat-card"><div class="stat-label">Ca tôi đã đăng ký</div><div class="stat-value" id="stat-mine">—</div></div>
         <div class="stat-card"><div class="stat-label">Tổng lượt tuần này</div><div class="stat-value" id="stat-week">—</div></div>
         <div class="stat-card"><div class="stat-label">Tổng lượt tháng</div><div class="stat-value" id="stat-month">—</div></div>
       </div>
 
-      <!-- Nav + legend -->
       <div class="week-nav">
         <button class="btn btn-outline btn-sm" onclick="navPrev()">‹</button>
         <button class="btn btn-ghost btn-sm" onclick="navToday()">Hôm nay</button>
@@ -119,7 +113,6 @@
         </div>
       </div>
 
-      <!-- Calendar -->
       <div class="cal-wrapper" id="cal-wrapper">
         <div class="loading-overlay"><div class="loader"></div></div>
       </div>
@@ -589,8 +582,9 @@ async function toggleBooking(ds, shiftOrEnc, hasRegistered, scheduleId, keepModa
   const shift = decodeURIComponent(shiftOrEnc);
   try {
     if (hasRegistered && scheduleId) {
-      const success = await cancelScheduleWithLock(scheduleId, ds);
-      if (!success) return;
+      const result = await cancelScheduleWithLock(scheduleId, ds);
+      if (!result) return; // lỗi hoặc user bấm cancel
+      // Nếu là "ABSENCE_SENT" thì vẫn reload để cập nhật UI
     } else {
       const res = await apiFetch("/schedules", { method:"POST", body:JSON.stringify({date:ds, shift}) });
       if (res && res.ok) {
